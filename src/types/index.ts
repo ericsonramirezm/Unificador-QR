@@ -85,6 +85,10 @@ export interface Documento {
   foto_url?: string;
   pdf_url?: string;
 
+  // Orden manual dentro del día (sin valor: Coordinador primero, luego por
+  // fecha de carga — ver src/lib/orden.ts)
+  orden?: number | null;
+
   comentario_rechazo?: string;
 
   fecha_creacion: string;

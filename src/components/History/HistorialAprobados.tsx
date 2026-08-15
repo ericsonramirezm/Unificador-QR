@@ -5,6 +5,7 @@ import { db, storage } from '@lib/supabase'
 import { useCompilarDia } from '@hooks/useCompilarDia'
 import { generarQRConFecha } from '@lib/generarQR'
 import { formatearCargo } from '@lib/formato'
+import { ordenarDocumentos } from '@lib/orden'
 
 interface HistorialAprobadosProps {
   usuario?: Usuario
@@ -58,6 +59,14 @@ function agruparPorMesYDia(documentos: Documento[]): GrupoPorMes[] {
 
     dia.documentos.push(doc)
   }
+
+  // Dentro de cada día: Coordinador primero, luego el resto (mismo orden que
+  // se ve/edita en el Pasillo de revisión y que define el compilado del día)
+  meses.forEach((mes) => {
+    mes.dias.forEach((dia) => {
+      dia.documentos = ordenarDocumentos(dia.documentos)
+    })
+  })
 
   return meses
 }

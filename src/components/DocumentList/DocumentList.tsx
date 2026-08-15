@@ -5,6 +5,8 @@ import { db, storage } from '@lib/supabase'
 import { useCompilarDia } from '@hooks/useCompilarDia'
 import { generarQRConFecha } from '@lib/generarQR'
 import { formatearCargo } from '@lib/formato'
+import { ordenarDocumentos } from '@lib/orden'
+import { girarPaginasPDF, girarImagen } from '@lib/girarArchivo'
 import { CameraUpload } from '@components/Upload/CameraUpload'
 
 interface DocumentListProps {
@@ -39,6 +41,12 @@ function agruparPorDia(documentos: Documento[]): GrupoPorDia[] {
     grupo.documentos.push(doc)
   }
 
+  // Coordinador primero, luego el resto por fecha de carga (o el orden manual
+  // que se haya guardado) — ver src/lib/orden.ts
+  grupos.forEach((g) => {
+    g.documentos = ordenarDocumentos(g.documentos)
+  })
+
   return grupos
 }
 
@@ -46,6 +54,8 @@ function agruparPorPersona(documentos: Documento[]): SubgrupoPersona[] {
   const subgrupos: SubgrupoPersona[] = []
   const indicePorUsuario = new Map<string, SubgrupoPersona>()
 
+  // "documentos" ya viene ordenado (Coordinador primero) desde agruparPorDia,
+  // así que el subgrupo del Coordinador queda primero también, sin más que hacer.
   for (const doc of documentos) {
     let subgrupo = indicePorUsuario.get(doc.creado_por)
     if (!subgrupo) {
@@ -128,6 +138,12 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
   // Eliminar documentos (solo Coordinador)
   const [eliminando, setEliminando] = useState(false)
   const [eliminarError, setEliminarError] = useState<string | null>(null)
+
+  // Ordenar y girar documentos (solo Coordinador)
+  const [ordenando, setOrdenando] = useState<{ fecha: string } | null>(null)
+  const [moviendo, setMoviendo] = useState(false)
+  const [girandoId, setGirandoId] = useState<string | null>(null)
+  const [ordenError, setOrdenError] = useState<string | null>(null)
 
   const esCoordinador = usuario?.rol === UserRole.COORDINADOR
   const puedeCargar =
@@ -298,19 +314,9 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
         await db.eliminarDocumentoCompleto(doc)
       }
 
-      if (contrato) {
-        const fechasAfectadas = new Set(docs.map((d) => d.fecha_creacion.slice(0, 10)))
-        for (const fecha of fechasAfectadas) {
-          try {
-            await db.invalidarCompiladoDia(contrato.id, fecha)
-          } catch {
-            // si falla invalidar el caché no es crítico, solo evita que quede desactualizado
-          }
-          setQrGenerados((prev) => {
-            const { [fecha]: _quitado, ...resto } = prev
-            return resto
-          })
-        }
+      const fechasAfectadas = new Set(docs.map((d) => d.fecha_creacion.slice(0, 10)))
+      for (const fecha of fechasAfectadas) {
+        await invalidarCacheDelDia(fecha)
       }
 
       await cargarDocumentos()
@@ -319,6 +325,90 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
       setEliminarError(msg)
     } finally {
       setEliminando(false)
+    }
+  }
+
+  // Invalida el compilado en caché del día y limpia el QR ya generado en
+  // memoria — se usa tras reordenar o girar, porque el contenido del día
+  // cambió y el compilado/QR anteriores ya no reflejan lo actual.
+  const invalidarCacheDelDia = async (fecha: string) => {
+    if (!contrato) return
+    try {
+      await db.invalidarCompiladoDia(contrato.id, fecha)
+    } catch {
+      // no crítico
+    }
+    setQrGenerados((prev) => {
+      const { [fecha]: _quitado, ...resto } = prev
+      return resto
+    })
+  }
+
+  // Mueve un documento una posición arriba/abajo dentro del día, y guarda el
+  // nuevo orden de TODOS los documentos de ese día (mezclando personas).
+  const moverDocumento = async (grupo: GrupoPorDia, index: number, direccion: 'arriba' | 'abajo') => {
+    const nuevoIndex = direccion === 'arriba' ? index - 1 : index + 1
+    if (nuevoIndex < 0 || nuevoIndex >= grupo.documentos.length) return
+
+    const reordenados = [...grupo.documentos]
+    const [item] = reordenados.splice(index, 1)
+    reordenados.splice(nuevoIndex, 0, item)
+
+    setMoviendo(true)
+    setOrdenError(null)
+    try {
+      await Promise.all(reordenados.map((doc, i) => db.actualizarDocumento(doc.id, { orden: i })))
+      await invalidarCacheDelDia(grupo.fecha)
+      await cargarDocumentos()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al reordenar'
+      setOrdenError(msg)
+    } finally {
+      setMoviendo(false)
+    }
+  }
+
+  // Gira 90° (izquierda o derecha) el PDF y la foto/miniatura de un documento,
+  // reemplazando los archivos en su misma ruta en Storage.
+  const girarDocumento = async (doc: Documento, grados: number) => {
+    setGirandoId(doc.id)
+    setOrdenError(null)
+
+    try {
+      const bucket = 'documentos'
+      const updates: { pdf_url?: string; foto_url?: string } = {}
+
+      if (doc.pdf_url) {
+        const path = db._pathDesdeUrlPublica(doc.pdf_url, bucket)
+        if (path) {
+          const nuevoPdfBlob = await girarPaginasPDF(doc.pdf_url, grados)
+          await storage.reemplazarArchivo(bucket, path, nuevoPdfBlob, 'application/pdf')
+          const urlBase = await storage.getPublicUrl(bucket, path)
+          updates.pdf_url = `${urlBase}?v=${Date.now()}`
+        }
+      }
+
+      if (doc.foto_url) {
+        const path = db._pathDesdeUrlPublica(doc.foto_url, bucket)
+        if (path) {
+          const nuevaFotoBlob = await girarImagen(doc.foto_url, grados)
+          await storage.reemplazarArchivo(bucket, path, nuevaFotoBlob, 'image/jpeg')
+          const urlBase = await storage.getPublicUrl(bucket, path)
+          updates.foto_url = `${urlBase}?v=${Date.now()}`
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await db.actualizarDocumento(doc.id, updates)
+      }
+
+      await invalidarCacheDelDia(doc.fecha_creacion.slice(0, 10))
+      await cargarDocumentos()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al girar el documento'
+      setOrdenError(msg)
+    } finally {
+      setGirandoId(null)
     }
   }
 
@@ -343,6 +433,11 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
         (d) => d.fecha_creacion.slice(0, 10) === revisando.fecha && d.creado_por === revisando.usuarioId
       )
     : []
+
+  // Grupo/documentos del modal de ordenar y girar, también en vivo — ya vienen
+  // ordenados (Coordinador primero) porque agruparPorDia los ordena.
+  const grupoDeOrdenando = ordenando ? grupos.find((g) => g.fecha === ordenando.fecha) : undefined
+  const documentosDelOrdenando = grupoDeOrdenando?.documentos ?? []
 
   return (
     <div className="space-y-4">
@@ -488,6 +583,14 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                         }`}
                       >
                         {compilandoEsteDia === 'pdf' ? 'Generando…' : '⬇️ Descargar PDF'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOrdenando({ fecha: grupo.fecha })}
+                        title="Ordenar y girar los documentos de este día"
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20"
+                      >
+                        ↕️ Ordenar y girar
                       </button>
                       <button
                         type="button"
@@ -768,6 +871,102 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                 </div>
               </>
             )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Modal de ordenar y girar (solo Coordinador) */}
+      <Dialog.Root open={!!ordenando} onOpenChange={(open) => !open && setOrdenando(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 z-40" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-white rounded-lg shadow-xl z-50 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <Dialog.Title className="text-lg font-bold text-slate-900">Ordenar y girar</Dialog.Title>
+                {ordenando && <p className="text-sm text-slate-500">{formatearFechaGrupo(ordenando.fecha)}</p>}
+              </div>
+              <Dialog.Close asChild>
+                <button className="text-slate-400 hover:text-slate-700 text-2xl leading-none" aria-label="Cerrar">
+                  ×
+                </button>
+              </Dialog.Close>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-4">
+              El orden de esta lista es el orden final de páginas en el PDF compilado del día.
+            </p>
+
+            {ordenError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm mb-4">
+                {ordenError}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {documentosDelOrdenando.map((doc, idx) => (
+                <div key={doc.id} className="flex items-center gap-3 border border-slate-200 rounded-lg p-3">
+                  <span className="text-sm font-bold text-slate-400 w-5 text-center flex-shrink-0">{idx + 1}</span>
+
+                  {doc.foto_url ? (
+                    <img
+                      src={doc.foto_url}
+                      alt={doc.titulo}
+                      className="w-16 h-20 object-cover rounded-md border border-slate-200 flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="w-16 h-20 rounded-md border border-slate-200 bg-slate-100 flex-shrink-0" />
+                  )}
+
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{doc.titulo}</p>
+                    <p className="text-xs text-slate-500 mt-1 truncate">
+                      {doc.usuario_creador?.nombre || '—'}
+                      {doc.usuario_creador?.rol ? ` (${formatearCargo(doc.usuario_creador.rol)})` : ''}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      disabled={girandoId === doc.id}
+                      onClick={() => girarDocumento(doc, -90)}
+                      title="Girar a la izquierda"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      ↺
+                    </button>
+                    <button
+                      type="button"
+                      disabled={girandoId === doc.id}
+                      onClick={() => girarDocumento(doc, 90)}
+                      title="Girar a la derecha"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      ↻
+                    </button>
+                    <div className="w-px h-6 bg-slate-200 mx-1" />
+                    <button
+                      type="button"
+                      disabled={moviendo || idx === 0}
+                      onClick={() => grupoDeOrdenando && moverDocumento(grupoDeOrdenando, idx, 'arriba')}
+                      title="Mover arriba"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      disabled={moviendo || idx === documentosDelOrdenando.length - 1}
+                      onClick={() => grupoDeOrdenando && moverDocumento(grupoDeOrdenando, idx, 'abajo')}
+                      title="Mover abajo"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

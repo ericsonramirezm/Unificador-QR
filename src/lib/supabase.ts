@@ -115,6 +115,17 @@ export const storage = {
     if (error) throw error
     return data
   },
+
+  // Reemplaza un archivo ya subido en su misma ruta (ej. al girar un
+  // documento) — a diferencia de uploadFoto, sí sobrescribe lo que había.
+  async reemplazarArchivo(bucket: string, path: string, file: Blob, contentType?: string) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .upload(path, file, { cacheControl: '3600', upsert: true, contentType })
+
+    if (error) throw error
+    return data
+  },
 }
 
 // ============ DATABASE HELPERS ============

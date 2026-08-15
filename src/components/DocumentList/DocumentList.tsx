@@ -998,6 +998,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                 usuarioNombre={usuario.nombre}
                 usuarioRol={usuario.rol}
                 permitirSeleccionArchivo={esCoordinador}
+                permitirEscaneo={usuario.rol === UserRole.SUPERVISOR || usuario.rol === UserRole.APR}
               />
             )}
           </Dialog.Content>

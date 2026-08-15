@@ -4,6 +4,7 @@ import { db, storage } from '@lib/supabase'
 import { formatearCargo } from '@lib/formato'
 import { generarMiniaturaPDF } from '@lib/renderizarPDF'
 import { Documento, DocumentType, Priority } from '@/types/index'
+import { AjustarEsquinasModal } from '@components/Upload/AjustarEsquinasModal'
 
 interface CameraUploadProps {
   contratoId: string
@@ -14,6 +15,11 @@ interface CameraUploadProps {
   // plataforma, incluyendo PDF reales). APR y Supervisor cargan exclusivamente con
   // la cámara del celular.
   permitirSeleccionArchivo?: boolean
+  // Cuando es true (Supervisor/APR), cada foto capturada pasa primero por el
+  // ajuste de esquinas (recorte + enderezado + mejora de color) antes de
+  // entrar al carrusel. El Coordinador no usa esto: sus fotos y PDFs
+  // adjuntados entran tal cual.
+  permitirEscaneo?: boolean
 }
 
 interface ItemCarrusel {
@@ -31,6 +37,7 @@ export const CameraUpload = ({
   usuarioNombre,
   usuarioRol,
   permitirSeleccionArchivo = false,
+  permitirEscaneo = false,
 }: CameraUploadProps) => {
   const { generatePDFFromImage, isGenerating } = usePDFGenerator()
 
@@ -45,6 +52,12 @@ export const CameraUpload = ({
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [uploadedDocs, setUploadedDocs] = useState<Documento[]>([])
 
+  // Cola de fotos pendientes de pasar por el ajuste de esquinas (permitirEscaneo).
+  // Hoy la cámara captura una foto por toque, así que la cola casi siempre
+  // queda vacía, pero soporta correctamente varias fotos a la vez.
+  const [colaEscaneo, setColaEscaneo] = useState<File[]>([])
+  const [archivoEnEscaneo, setArchivoEnEscaneo] = useState<File | null>(null)
+
   const agregarItem = (item: ItemCarrusel) => {
     setFotos((prev) => {
       const actualizadas = [...prev, item]
@@ -54,7 +67,32 @@ export const CameraUpload = ({
   }
 
   const handleFilesSelect = async (files: FileList) => {
-    for (const file of Array.from(files)) {
+    const lista = Array.from(files)
+
+    if (permitirEscaneo) {
+      // Solo las fotos pasan por el ajuste de esquinas; un PDF (si llegara
+      // por este input) se agrega directo, igual que en el flujo normal.
+      const imagenes = lista.filter((f) => f.type !== 'application/pdf')
+      const pdfs = lista.filter((f) => f.type === 'application/pdf')
+
+      for (const pdf of pdfs) {
+        try {
+          const { previewDataUrl, miniaturaBlob } = await generarMiniaturaPDF(pdf)
+          agregarItem({ file: pdf, preview: previewDataUrl, esPDF: true, miniaturaBlob })
+          setUploadError(null)
+        } catch {
+          setUploadError(`No se pudo generar la vista previa de "${pdf.name}"`)
+        }
+      }
+
+      if (imagenes.length > 0) {
+        setColaEscaneo((prev) => [...prev, ...imagenes.slice(1)])
+        setArchivoEnEscaneo(imagenes[0])
+      }
+      return
+    }
+
+    for (const file of lista) {
       if (file.type === 'application/pdf') {
         try {
           const { previewDataUrl, miniaturaBlob } = await generarMiniaturaPDF(file)
@@ -81,6 +119,38 @@ export const CameraUpload = ({
         reader.readAsDataURL(file)
       })
     }
+  }
+
+  const avanzarColaEscaneo = () => {
+    setColaEscaneo((prev) => {
+      if (prev.length === 0) {
+        setArchivoEnEscaneo(null)
+        return prev
+      }
+      const [siguiente, ...resto] = prev
+      setArchivoEnEscaneo(siguiente)
+      return resto
+    })
+  }
+
+  const handleAplicarEscaneo = (blob: Blob, nombreOriginal: string) => {
+    const file = new File([blob], nombreOriginal, { type: 'image/jpeg' })
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const preview = e.target?.result as string
+      agregarItem({ file, preview, esPDF: false })
+      setUploadError(null)
+      avanzarColaEscaneo()
+    }
+    reader.onerror = () => {
+      setUploadError('Error al procesar el documento escaneado')
+      avanzarColaEscaneo()
+    }
+    reader.readAsDataURL(blob)
+  }
+
+  const handleCancelarEscaneo = () => {
+    avanzarColaEscaneo()
   }
 
   const eliminarFoto = (index: number) => {
@@ -372,6 +442,16 @@ export const CameraUpload = ({
             </div>
           </div>
         </div>
+      )}
+
+      {permitirEscaneo && (
+        <AjustarEsquinasModal
+          open={archivoEnEscaneo !== null}
+          imagenFile={archivoEnEscaneo}
+          restantes={colaEscaneo.length}
+          onAplicar={handleAplicarEscaneo}
+          onCancelar={handleCancelarEscaneo}
+        />
       )}
     </div>
   )

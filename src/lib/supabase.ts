@@ -31,6 +31,14 @@ export const auth = {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      // Sin esto, el link del correo de confirmación usa la "Site URL" que
+      // esté configurada en el proyecto de Supabase (Authentication > URL
+      // Configuration) — que suele quedar en el valor por defecto
+      // http://localhost:3000 si nunca se cambió. Pasando el origen actual
+      // acá, el link apunta a donde sea que se esté usando la app (el
+      // dominio publicado o localhost en desarrollo), siempre que ese
+      // origen esté en la lista de "Redirect URLs" permitidas del proyecto.
+      options: { emailRedirectTo: window.location.origin },
     })
 
     if (error) throw error

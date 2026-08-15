@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { usePDFGenerator, generatePDFFilename } from '@hooks/usePDFGenerator'
 import { db, storage } from '@lib/supabase'
 import { formatearCargo } from '@lib/formato'
+import { generarMiniaturaPDF } from '@lib/renderizarPDF'
 import { Documento, DocumentType, Priority } from '@/types/index'
 
 interface CameraUploadProps {
@@ -10,8 +11,18 @@ interface CameraUploadProps {
   usuarioNombre: string
   usuarioRol?: string
   // Solo el Coordinador puede adjuntar documentos ya existentes (descargados de otra
-  // plataforma). APR y Supervisor cargan exclusivamente con la cámara del celular.
+  // plataforma, incluyendo PDF reales). APR y Supervisor cargan exclusivamente con
+  // la cámara del celular.
   permitirSeleccionArchivo?: boolean
+}
+
+interface ItemCarrusel {
+  file: File
+  preview: string
+  esPDF: boolean
+  // Solo para PDF ya existentes: miniatura de la página 1, generada en el navegador,
+  // que se sube como "foto" (no hay una foto real que subir en ese caso).
+  miniaturaBlob?: Blob
 }
 
 export const CameraUpload = ({
@@ -26,31 +37,50 @@ export const CameraUpload = ({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
 
-  // Carrusel de fotos
-  const [fotos, setFotos] = useState<{ file: File; preview: string }[]>([])
+  // Carrusel de fotos/PDFs
+  const [fotos, setFotos] = useState<ItemCarrusel[]>([])
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [uploadedDocs, setUploadedDocs] = useState<Documento[]>([])
 
-  const handleFilesSelect = (files: FileList) => {
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const preview = e.target?.result as string
-        setFotos((prev) => {
-          const actualizadas = [...prev, { file, preview }]
-          setCurrentPhotoIndex(actualizadas.length - 1)
-          return actualizadas
-        })
-        setUploadError(null)
-      }
-      reader.onerror = () => {
-        setUploadError('Error al leer una de las imágenes seleccionadas')
-      }
-      reader.readAsDataURL(file)
+  const agregarItem = (item: ItemCarrusel) => {
+    setFotos((prev) => {
+      const actualizadas = [...prev, item]
+      setCurrentPhotoIndex(actualizadas.length - 1)
+      return actualizadas
     })
+  }
+
+  const handleFilesSelect = async (files: FileList) => {
+    for (const file of Array.from(files)) {
+      if (file.type === 'application/pdf') {
+        try {
+          const { previewDataUrl, miniaturaBlob } = await generarMiniaturaPDF(file)
+          agregarItem({ file, preview: previewDataUrl, esPDF: true, miniaturaBlob })
+          setUploadError(null)
+        } catch {
+          setUploadError(`No se pudo generar la vista previa de "${file.name}"`)
+        }
+        continue
+      }
+
+      await new Promise<void>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const preview = e.target?.result as string
+          agregarItem({ file, preview, esPDF: false })
+          setUploadError(null)
+          resolve()
+        }
+        reader.onerror = () => {
+          setUploadError('Error al leer una de las imágenes seleccionadas')
+          resolve()
+        }
+        reader.readAsDataURL(file)
+      })
+    }
   }
 
   const eliminarFoto = (index: number) => {
@@ -86,24 +116,27 @@ export const CameraUpload = ({
         day: '2-digit',
       })
 
-      // Procesar cada foto
+      // Procesar cada foto o PDF
       for (let i = 0; i < fotos.length; i++) {
-        const { file } = fotos[i]
+        const { file, esPDF, miniaturaBlob } = fotos[i]
         const cargo = formatearCargo(usuarioRol)
         const titulo = `${usuarioNombre}${cargo ? ` (${cargo})` : ''} · ${fechaLabel} (${i + 1}/${fotos.length})`
 
-        // 1. Convertir foto a PDF (nombre y cargo se dibujan como encabezado,
-        // en dos líneas, dentro de la página)
-        const pdfBlob = await generatePDFFromImage(file, usuarioNombre, cargo)
+        // 1. El PDF a subir: si ya es un PDF real, se sube tal cual (sin pasar por
+        // el generador de foto→PDF); si es una foto, se convierte con encabezado.
+        const pdfBlob = esPDF ? file : await generatePDFFromImage(file, usuarioNombre, cargo)
 
         // 2. Generar nombre de archivo (secuencia atómica del servidor,
         // única entre TODOS los usuarios que carguen ese día para este contrato)
         const secuencia = await db.obtenerSiguienteSecuenciaPDF(contratoId, fechaHoy)
         const pdfFilename = generatePDFFilename(fechaHoy, secuencia)
 
-        // 3. Subir foto original a Storage
-        const fotoPath = `fotos/${contratoId}/${Date.now()}_${i}_${file.name}`
-        const fotoResult = await storage.uploadFoto('documentos', fotoPath, file)
+        // 3. Subir la "foto": la imagen original, o si es un PDF ya existente,
+        // la miniatura generada de su primera página.
+        const fotoBlob = esPDF ? miniaturaBlob! : file
+        const fotoNombre = esPDF ? `${file.name.replace(/\.pdf$/i, '')}_miniatura.jpg` : file.name
+        const fotoPath = `fotos/${contratoId}/${Date.now()}_${i}_${fotoNombre}`
+        const fotoResult = await storage.uploadFoto('documentos', fotoPath, fotoBlob)
         const fotoUrl = await storage.getPublicUrl('documentos', fotoResult.path)
 
         // 4. Subir PDF a Storage
@@ -131,7 +164,7 @@ export const CameraUpload = ({
           documento_id: documento.id,
           usuario_id: usuarioId,
           accion: 'creado',
-          detalle: `Foto ${i + 1}/${fotos.length} cargada por ${usuarioNombre}`,
+          detalle: `${esPDF ? 'PDF' : 'Foto'} ${i + 1}/${fotos.length} cargado por ${usuarioNombre}`,
         })
 
         nuevosDocumentos.push(documento)
@@ -156,12 +189,12 @@ export const CameraUpload = ({
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Carrusel de fotos */}
+      {/* Carrusel de fotos/PDFs */}
       {fotos.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-slate-900">
-              Fotos capturadas: {fotos.length}
+              Documentos: {fotos.length}
             </h3>
             <span className="text-sm text-slate-500">
               {currentPhotoIndex + 1} / {fotos.length}
@@ -169,10 +202,15 @@ export const CameraUpload = ({
           </div>
 
           {/* Preview actual */}
-          <div className="bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center h-96">
+          <div className="bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center h-96 relative">
+            {fotos[currentPhotoIndex].esPDF && (
+              <span className="absolute top-2 left-2 bg-slate-800 text-white text-xs font-semibold px-2 py-1 rounded">
+                📄 PDF
+              </span>
+            )}
             <img
               src={fotos[currentPhotoIndex].preview}
-              alt={`Foto ${currentPhotoIndex + 1}`}
+              alt={`Documento ${currentPhotoIndex + 1}`}
               className="max-h-full max-w-full object-contain"
             />
           </div>
@@ -193,13 +231,18 @@ export const CameraUpload = ({
               {fotos.map((foto, idx) => (
                 <div
                   key={idx}
-                  className={`flex-shrink-0 w-16 h-16 rounded-lg cursor-pointer overflow-hidden border-2 transition-all ${
+                  className={`flex-shrink-0 w-16 h-16 rounded-lg cursor-pointer overflow-hidden border-2 transition-all relative ${
                     idx === currentPhotoIndex
                       ? 'border-blue-600 ring-2 ring-blue-400'
                       : 'border-slate-300 hover:border-slate-400'
                   }`}
                   onClick={() => setCurrentPhotoIndex(idx)}
                 >
+                  {foto.esPDF && (
+                    <span className="absolute top-0 right-0 bg-slate-800 text-white text-[9px] font-bold px-1">
+                      PDF
+                    </span>
+                  )}
                   <img
                     src={foto.preview}
                     alt={`Miniatura ${idx + 1}`}
@@ -225,7 +268,7 @@ export const CameraUpload = ({
             onClick={() => eliminarFoto(currentPhotoIndex)}
             className="w-full text-sm text-red-600 hover:text-red-700 font-semibold py-2 border border-red-300 rounded-lg hover:bg-red-50"
           >
-            🗑️ Eliminar esta foto
+            🗑️ Eliminar este documento
           </button>
         </div>
       )}
@@ -235,9 +278,9 @@ export const CameraUpload = ({
         <p className="text-sm text-slate-600 font-semibold">
           {fotos.length === 0
             ? permitirSeleccionArchivo
-              ? 'Captura fotos con la cámara (de a una) o elige varias desde tu galería'
+              ? 'Captura fotos con la cámara (de a una) o elige fotos/PDF desde tu equipo'
               : 'Captura fotos con la cámara. Sigue tocando el botón hasta tener todas las que necesitas.'
-            : 'Sigue agregando fotos o continúa con estas'}
+            : 'Sigue agregando documentos o continúa con estos'}
         </p>
         <div className="flex gap-3">
           <button
@@ -273,7 +316,7 @@ export const CameraUpload = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf"
             multiple
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) handleFilesSelect(e.target.files)
@@ -284,7 +327,7 @@ export const CameraUpload = ({
         )}
       </div>
 
-      {/* Enviar al pasillo de revisión (solo si hay fotos) */}
+      {/* Enviar al pasillo de revisión (solo si hay documentos) */}
       {fotos.length > 0 && (
         <div className="space-y-4">
           <button

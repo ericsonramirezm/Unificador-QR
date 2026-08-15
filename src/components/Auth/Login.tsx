@@ -13,6 +13,18 @@ interface LoginProps {
   onLoginSuccess: (userId: string) => void
 }
 
+// Los errores de Supabase (ej. PostgrestError al fallar una política RLS) no
+// son instancias de `Error` de JavaScript — solo objetos con `.message` — así
+// que `err instanceof Error` los deja pasar al mensaje genérico y esconde la
+// causa real. Esto revisa `.message` sin importar el tipo del error.
+function extraerMensajeError(err: unknown): string {
+  if (err && typeof err === 'object' && 'message' in err) {
+    const mensaje = (err as { message?: unknown }).message
+    if (typeof mensaje === 'string' && mensaje.trim()) return mensaje
+  }
+  return 'Ocurrió un error inesperado'
+}
+
 export const Login = ({ onLoginSuccess }: LoginProps) => {
   const [modo, setModo] = useState<'login' | 'registro'>('login')
   const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormData>()
@@ -56,8 +68,7 @@ export const Login = ({ onLoginSuccess }: LoginProps) => {
       )
       cambiarModo('login')
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Ocurrió un error inesperado'
-      setErrorMsg(message)
+      setErrorMsg(extraerMensajeError(err))
     } finally {
       setIsLoading(false)
     }

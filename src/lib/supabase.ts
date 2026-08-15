@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { UserRole } from '@/types/index'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -14,7 +15,19 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 // ============ AUTH HELPERS ============
 
 export const auth = {
-  async signUp(email: string, password: string, nombre: string, rol: string) {
+  // Auto-registro: el rol NUNCA lo elige quien se registra — siempre queda
+  // en Consultor (el rol de menor privilegio), y solo el Coordinador puede
+  // subirlo después desde el panel de Usuarios. Esto se refuerza también a
+  // nivel de RLS (ver add_registro_usuarios.sql: el "with check" exige
+  // rol='consultor' en el insert), así que no basta con cambiar este código
+  // para saltárselo.
+  //
+  // Devuelve `sesionInmediata: false` si el proyecto de Supabase tiene
+  // habilitada la confirmación de correo (no hay sesión hasta que el
+  // usuario haga clic en el enlace que le llega por email) — la UI debe
+  // mostrar un aviso de "revisa tu correo" en ese caso en vez de intentar
+  // continuar como si ya hubiera iniciado sesión.
+  async signUp(email: string, password: string, nombre: string) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -23,7 +36,6 @@ export const auth = {
     if (error) throw error
 
     if (data.user) {
-      // Crear perfil de usuario en tabla usuarios
       const { error: profileError } = await supabase
         .from('usuarios')
         .insert([
@@ -31,14 +43,14 @@ export const auth = {
             id: data.user.id,
             email,
             nombre,
-            rol,
+            rol: UserRole.CONSULTOR,
           },
         ])
 
       if (profileError) throw profileError
     }
 
-    return data
+    return { user: data.user, sesionInmediata: data.session !== null }
   },
 
   async signIn(email: string, password: string) {
@@ -144,6 +156,26 @@ export const db = {
 
     if (error) throw error
     return data as number
+  },
+
+  // Usuarios (gestión de roles, panel del Coordinador — usa las políticas
+  // "coordinador_ver_usuarios"/"coordinador_actualizar_usuarios" de RLS)
+  async obtenerUsuarios() {
+    const { data, error } = await supabase.from('usuarios').select('*').order('nombre')
+    if (error) throw error
+    return data
+  },
+
+  async actualizarRolUsuario(id: string, rol: UserRole) {
+    const { data, error } = await supabase
+      .from('usuarios')
+      .update({ rol })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
   },
 
   // Contratos

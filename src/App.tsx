@@ -3,13 +3,14 @@ import { Login } from '@components/Auth/Login'
 import { Layout } from '@components/Layout/Layout'
 import { DocumentList } from '@components/DocumentList/DocumentList'
 import { HistorialAprobados } from '@components/History/HistorialAprobados'
+import { GestionUsuarios } from '@components/Users/GestionUsuarios'
 import { Usuario, UserRole } from '@/types/index'
 import { auth, db } from '@lib/supabase'
 
 export function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [activeView, setActiveView] = useState<'documentos' | 'config' | 'historial'>('documentos')
+  const [activeView, setActiveView] = useState<'documentos' | 'config' | 'historial' | 'usuarios'>('documentos')
   const [contratoActivo, setContratoActivo] = useState<any>(null)
 
   useEffect(() => {
@@ -82,6 +83,10 @@ export function App() {
 
       {activeView === 'historial' && usuario.rol === UserRole.COORDINADOR && (
         <HistorialAprobados usuario={usuario} contrato={contratoActivo} />
+      )}
+
+      {activeView === 'usuarios' && usuario.rol === UserRole.COORDINADOR && (
+        <GestionUsuarios usuario={usuario} />
       )}
 
       {activeView === 'config' && (

@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { auth } from '@lib/supabase'
 
-interface LoginFormData {
+interface FormData {
   email: string
   password: string
+  nombre?: string
+  confirmarPassword?: string
 }
 
 interface LoginProps {
@@ -12,21 +14,49 @@ interface LoginProps {
 }
 
 export const Login = ({ onLoginSuccess }: LoginProps) => {
-  const { register, handleSubmit, formState: { errors } } = useForm<LoginFormData>()
+  const [modo, setModo] = useState<'login' | 'registro'>('login')
+  const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormData>()
   const [isLoading, setIsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [avisoConfirmacion, setAvisoConfirmacion] = useState<string | null>(null)
 
-  const onSubmit = async (data: LoginFormData) => {
+  const cambiarModo = (nuevoModo: 'login' | 'registro') => {
+    setModo(nuevoModo)
+    setErrorMsg(null)
+    setAvisoConfirmacion(null)
+    reset()
+  }
+
+  const onSubmit = async (data: FormData) => {
     setIsLoading(true)
     setErrorMsg(null)
+    setAvisoConfirmacion(null)
 
     try {
-      const result = await auth.signIn(data.email, data.password)
-      if (result.user?.id) {
-        onLoginSuccess(result.user.id)
+      if (modo === 'login') {
+        const result = await auth.signIn(data.email, data.password)
+        if (result.user?.id) {
+          onLoginSuccess(result.user.id)
+        }
+        return
       }
+
+      // Registro: el rol siempre queda en Consultor — solo el Coordinador
+      // puede subirlo después desde el panel de Usuarios.
+      const { user, sesionInmediata } = await auth.signUp(data.email, data.password, data.nombre ?? '')
+
+      if (sesionInmediata && user?.id) {
+        onLoginSuccess(user.id)
+        return
+      }
+
+      // El proyecto exige confirmar el correo antes de poder iniciar sesión.
+      setAvisoConfirmacion(
+        'Cuenta creada. Revisa tu correo y confirma tu cuenta antes de iniciar sesión.'
+      )
+      cambiarModo('login')
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Error al iniciar sesión'
+      const message = err instanceof Error ? err.message : 'Ocurrió un error inesperado'
       setErrorMsg(message)
     } finally {
       setIsLoading(false)
@@ -41,7 +71,7 @@ export const Login = ({ onLoginSuccess }: LoginProps) => {
         <div className="absolute w-96 h-96 bg-blue-300 rounded-full blur-3xl bottom-0 right-0 translate-x-1/2 translate-y-1/2"></div>
       </div>
 
-      {/* Card de login */}
+      {/* Card de login/registro */}
       <div className="relative z-10 w-full max-w-md bg-white rounded-xl shadow-2xl p-8">
         {/* Header */}
         <div className="mb-8 text-center">
@@ -56,8 +86,27 @@ export const Login = ({ onLoginSuccess }: LoginProps) => {
           <p className="text-sm text-slate-500 mt-1">Gestión de documentos SPCI</p>
         </div>
 
+        {avisoConfirmacion && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 mb-4">
+            {avisoConfirmacion}
+          </div>
+        )}
+
         {/* Formulario */}
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {modo === 'registro' && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Nombre completo</label>
+              <input
+                type="text"
+                placeholder="Juan Pérez"
+                {...register('nombre', { required: 'El nombre es requerido' })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+              />
+              {errors.nombre && <p className="text-red-600 text-xs mt-1">{errors.nombre.message}</p>}
+            </div>
+          )}
+
           {/* Email */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -102,6 +151,24 @@ export const Login = ({ onLoginSuccess }: LoginProps) => {
             )}
           </div>
 
+          {modo === 'registro' && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Confirmar contraseña</label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                {...register('confirmarPassword', {
+                  required: 'Confirma tu contraseña',
+                  validate: (value) => value === watch('password') || 'Las contraseñas no coinciden',
+                })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+              />
+              {errors.confirmarPassword && (
+                <p className="text-red-600 text-xs mt-1">{errors.confirmarPassword.message}</p>
+              )}
+            </div>
+          )}
+
           {/* Error general */}
           {errorMsg && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
@@ -115,14 +182,27 @@ export const Login = ({ onLoginSuccess }: LoginProps) => {
             disabled={isLoading}
             className="w-full bg-blue-600 text-white font-semibold py-2 rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
           >
-            {isLoading ? 'Iniciando sesión...' : 'Iniciar sesión'}
+            {isLoading
+              ? modo === 'login' ? 'Iniciando sesión...' : 'Creando cuenta...'
+              : modo === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}
           </button>
         </form>
 
+        {/* Toggle login/registro */}
+        <button
+          type="button"
+          onClick={() => cambiarModo(modo === 'login' ? 'registro' : 'login')}
+          className="w-full text-center text-sm text-blue-600 hover:text-blue-700 font-semibold mt-4"
+        >
+          {modo === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
+        </button>
+
         {/* Footer */}
-        <p className="text-center text-xs text-slate-500 mt-6">
-          Sesión local — Contacta al administrador para acceso
-        </p>
+        {modo === 'registro' && (
+          <p className="text-center text-xs text-slate-500 mt-4">
+            Tu cuenta se crea con acceso de solo lectura — el Coordinador debe asignarte un rol.
+          </p>
+        )}
       </div>
     </div>
   )

@@ -2,7 +2,7 @@ import { Usuario, UserRole } from '@/types/index'
 import { auth } from '@lib/supabase'
 import { useState } from 'react'
 
-type Vista = 'documentos' | 'config' | 'historial'
+type Vista = 'documentos' | 'config' | 'historial' | 'usuarios'
 
 interface LayoutProps {
   usuario: Usuario | null
@@ -52,6 +52,13 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
                 label="Historial"
                 active={activeView === 'historial'}
                 onClick={() => onViewChange('historial')}
+                expanded={navExpanded}
+              />
+              <NavItem
+                icon="👤"
+                label="Usuarios"
+                active={activeView === 'usuarios'}
+                onClick={() => onViewChange('usuarios')}
                 expanded={navExpanded}
               />
             </>

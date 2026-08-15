@@ -125,6 +125,10 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
   // el Consultor no carga, solo visualiza)
   const [mostrarCarga, setMostrarCarga] = useState(false)
 
+  // Eliminar documentos (solo Coordinador)
+  const [eliminando, setEliminando] = useState(false)
+  const [eliminarError, setEliminarError] = useState<string | null>(null)
+
   const esCoordinador = usuario?.rol === UserRole.COORDINADOR
   const puedeCargar =
     usuario?.rol === UserRole.COORDINADOR ||
@@ -279,6 +283,45 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
     }
   }
 
+  // Borra uno o varios documentos por completo (registro + archivos en Storage),
+  // invalida el compilado en caché del día correspondiente (si existe) para que
+  // el próximo QR/PDF se regenere sin los documentos eliminados, y refresca la lista.
+  const eliminarDocumentos = async (docs: Documento[], mensajeConfirmacion: string) => {
+    if (docs.length === 0) return
+    if (!window.confirm(mensajeConfirmacion)) return
+
+    setEliminando(true)
+    setEliminarError(null)
+
+    try {
+      for (const doc of docs) {
+        await db.eliminarDocumentoCompleto(doc)
+      }
+
+      if (contrato) {
+        const fechasAfectadas = new Set(docs.map((d) => d.fecha_creacion.slice(0, 10)))
+        for (const fecha of fechasAfectadas) {
+          try {
+            await db.invalidarCompiladoDia(contrato.id, fecha)
+          } catch {
+            // si falla invalidar el caché no es crítico, solo evita que quede desactualizado
+          }
+          setQrGenerados((prev) => {
+            const { [fecha]: _quitado, ...resto } = prev
+            return resto
+          })
+        }
+      }
+
+      await cargarDocumentos()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al eliminar'
+      setEliminarError(msg)
+    } finally {
+      setEliminando(false)
+    }
+  }
+
   if (isLoading) {
     return <div className="text-center py-12">Cargando documentos...</div>
   }
@@ -303,6 +346,19 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
 
   return (
     <div className="space-y-4">
+      {eliminarError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm flex items-center justify-between gap-3">
+          <span>{eliminarError}</span>
+          <button
+            type="button"
+            onClick={() => setEliminarError(null)}
+            className="text-red-700 font-semibold flex-shrink-0"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Encabezado */}
       <div className="bg-white rounded-lg p-4 border border-slate-200 flex items-center justify-between gap-3 flex-wrap">
         <div>
@@ -433,6 +489,22 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                       >
                         {compilandoEsteDia === 'pdf' ? 'Generando…' : '⬇️ Descargar PDF'}
                       </button>
+                      <button
+                        type="button"
+                        disabled={eliminando}
+                        onClick={() =>
+                          eliminarDocumentos(
+                            grupo.documentos,
+                            `¿Eliminar los ${grupo.documentos.length} documentos de ${formatearFechaGrupo(
+                              grupo.fecha
+                            )}? Esta acción no se puede deshacer.`
+                          )
+                        }
+                        title="Eliminar todos los documentos de este día"
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-500/20 text-red-200 hover:bg-red-500/30 disabled:opacity-50"
+                      >
+                        🗑️
+                      </button>
                     </div>
                   )}
                 </div>
@@ -461,24 +533,42 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                               {sub.documentos.length !== 1 ? 's' : ''}
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setRevisando({
-                                fecha: grupo.fecha,
-                                usuarioId: sub.usuarioId,
-                                nombre: sub.nombre,
-                                cargo: sub.cargo,
-                              })
-                            }
-                            className={`px-4 py-2 text-sm font-semibold rounded-lg ${
-                              todosAprobados
-                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                : 'bg-blue-600 text-white hover:bg-blue-700'
-                            }`}
-                          >
-                            {todosAprobados ? '✓ Aprobado' : 'Revisar'}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRevisando({
+                                  fecha: grupo.fecha,
+                                  usuarioId: sub.usuarioId,
+                                  nombre: sub.nombre,
+                                  cargo: sub.cargo,
+                                })
+                              }
+                              className={`px-4 py-2 text-sm font-semibold rounded-lg ${
+                                todosAprobados
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : 'bg-blue-600 text-white hover:bg-blue-700'
+                              }`}
+                            >
+                              {todosAprobados ? '✓ Aprobado' : 'Revisar'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={eliminando}
+                              onClick={() =>
+                                eliminarDocumentos(
+                                  sub.documentos,
+                                  `¿Eliminar los ${sub.documentos.length} documentos de ${sub.nombre} (${formatearFechaGrupo(
+                                    grupo.fecha
+                                  )})? Esta acción no se puede deshacer.`
+                                )
+                              }
+                              title={`Eliminar todos los documentos de ${sub.nombre} este día`}
+                              className="w-9 h-9 flex items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         </div>
                       )
                     })}
@@ -578,18 +668,31 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                     </div>
                   </div>
 
-                  {doc.estado === DocumentStatus.APROBADO ? (
-                    <span className="text-green-600 text-sm font-semibold whitespace-nowrap">✓ Aprobado</span>
-                  ) : (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {doc.estado === DocumentStatus.APROBADO ? (
+                      <span className="text-green-600 text-sm font-semibold whitespace-nowrap">✓ Aprobado</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => aprobarDocumento(doc)}
+                        disabled={aprobandoId === doc.id}
+                        className="px-3 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:bg-slate-400 whitespace-nowrap"
+                      >
+                        {aprobandoId === doc.id ? 'Aprobando...' : 'Aprobar'}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => aprobarDocumento(doc)}
-                      disabled={aprobandoId === doc.id}
-                      className="px-3 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:bg-slate-400 whitespace-nowrap"
+                      disabled={eliminando}
+                      onClick={() =>
+                        eliminarDocumentos([doc], `¿Eliminar "${doc.titulo}"? Esta acción no se puede deshacer.`)
+                      }
+                      title="Eliminar este documento"
+                      className="w-9 h-9 flex items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
                     >
-                      {aprobandoId === doc.id ? 'Aprobando...' : 'Aprobar'}
+                      🗑️
                     </button>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>

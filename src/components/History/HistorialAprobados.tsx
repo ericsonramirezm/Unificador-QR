@@ -97,6 +97,10 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
   const { compilar } = useCompilarDia()
   const [qrPorDia, setQrPorDia] = useState<Record<string, EstadoQR>>({})
 
+  // Eliminar documentos (solo Coordinador ve este componente)
+  const [eliminando, setEliminando] = useState(false)
+  const [eliminarError, setEliminarError] = useState<string | null>(null)
+
   useEffect(() => {
     cargar()
   }, [])
@@ -183,6 +187,45 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
     setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
   }
 
+  // Borra uno o varios documentos por completo (registro + archivos en Storage),
+  // invalida el compilado en caché del día (para que el próximo QR/PDF se
+  // regenere sin lo eliminado) y refresca la lista.
+  const eliminarDocumentos = async (docs: Documento[], mensajeConfirmacion: string) => {
+    if (docs.length === 0) return
+    if (!window.confirm(mensajeConfirmacion)) return
+
+    setEliminando(true)
+    setEliminarError(null)
+
+    try {
+      for (const doc of docs) {
+        await db.eliminarDocumentoCompleto(doc)
+      }
+
+      if (contrato) {
+        const fechasAfectadas = new Set(docs.map((d) => fechaDeAgrupacion(d).slice(0, 10)))
+        for (const fecha of fechasAfectadas) {
+          try {
+            await db.invalidarCompiladoDia(contrato.id, fecha)
+          } catch {
+            // no crítico
+          }
+          setQrPorDia((prev) => {
+            const { [fecha]: _quitado, ...resto } = prev
+            return resto
+          })
+        }
+      }
+
+      await cargar()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al eliminar'
+      setEliminarError(msg)
+    } finally {
+      setEliminando(false)
+    }
+  }
+
   const descargarQRImagen = (dia: GrupoPorDia) => {
     const qr = qrPorDia[dia.fecha]
     if (qr?.estado !== 'listo') return
@@ -261,8 +304,28 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
 
   const qrDelDiaAbierto = diaAbierto ? qrPorDia[diaAbierto.fecha] : undefined
 
+  // Documentos del modal abierto, recalculados en cada render desde el estado
+  // vivo (no la copia fija guardada al abrirlo), así una eliminación se refleja
+  // al instante sin tener que cerrar y volver a abrir el modal.
+  const documentosDelDiaAbierto = diaAbierto
+    ? documentos.filter((d) => fechaDeAgrupacion(d).slice(0, 10) === diaAbierto.fecha)
+    : []
+
   return (
     <div className="space-y-4">
+      {eliminarError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm flex items-center justify-between gap-3">
+          <span>{eliminarError}</span>
+          <button
+            type="button"
+            onClick={() => setEliminarError(null)}
+            className="text-red-700 font-semibold flex-shrink-0"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg p-4 border border-slate-200">
         <h2 className="text-lg font-bold text-slate-900">Historial de aprobados</h2>
         <p className="text-sm text-slate-500 mt-1">
@@ -354,18 +417,35 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/50 z-40" />
           <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-white rounded-lg shadow-xl z-50 p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 gap-3">
               <div>
                 <Dialog.Title className="text-lg font-bold text-slate-900">
                   {diaAbierto && formatearFechaCorta(diaAbierto.fecha)}
                 </Dialog.Title>
                 <p className="text-sm text-slate-500">Documentación aprobada de este día</p>
               </div>
-              <Dialog.Close asChild>
-                <button className="text-slate-400 hover:text-slate-700 text-2xl leading-none" aria-label="Cerrar">
-                  ×
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  disabled={eliminando || documentosDelDiaAbierto.length === 0}
+                  onClick={() =>
+                    eliminarDocumentos(
+                      documentosDelDiaAbierto,
+                      `¿Eliminar los ${documentosDelDiaAbierto.length} documentos de ${
+                        diaAbierto ? formatearFechaCorta(diaAbierto.fecha) : 'este día'
+                      }? Esta acción no se puede deshacer.`
+                    )
+                  }
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  🗑️ Eliminar día completo
                 </button>
-              </Dialog.Close>
+                <Dialog.Close asChild>
+                  <button className="text-slate-400 hover:text-slate-700 text-2xl leading-none" aria-label="Cerrar">
+                    ×
+                  </button>
+                </Dialog.Close>
+              </div>
             </div>
 
             {qrDelDiaAbierto?.estado === 'listo' && (
@@ -410,7 +490,7 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
             )}
 
             <div className="space-y-3">
-              {diaAbierto?.documentos.map((doc) => (
+              {documentosDelDiaAbierto.map((doc) => (
                 <div key={doc.id} className="flex items-center gap-3 border border-slate-200 rounded-lg p-3">
                   {doc.foto_url ? (
                     <img
@@ -436,16 +516,29 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
                     <p className="text-xs text-slate-400 mt-0.5">{formatearHora(fechaDeAgrupacion(doc))}</p>
                   </div>
 
-                  {doc.pdf_url && (
-                    <a
-                      href={doc.pdf_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {doc.pdf_url && (
+                      <a
+                        href={doc.pdf_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                      >
+                        Ver PDF
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      disabled={eliminando}
+                      onClick={() =>
+                        eliminarDocumentos([doc], `¿Eliminar "${doc.titulo}"? Esta acción no se puede deshacer.`)
+                      }
+                      title="Eliminar este documento"
+                      className="w-9 h-9 flex items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
                     >
-                      Ver PDF
-                    </a>
-                  )}
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

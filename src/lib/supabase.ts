@@ -99,6 +99,12 @@ export const storage = {
     if (error) throw error
   },
 
+  async eliminarArchivos(bucket: string, paths: string[]) {
+    if (paths.length === 0) return
+    const { error } = await supabase.storage.from(bucket).remove(paths)
+    if (error) throw error
+  },
+
   // A diferencia de las fotos/PDF individuales (upsert:false, nunca se sobrescriben),
   // el compilado de un día SÍ debe poder regenerarse y reemplazar la versión anterior.
   async subirCompilado(path: string, file: Blob) {
@@ -184,6 +190,51 @@ export const db = {
 
   async eliminarDocumento(id: string) {
     const { error } = await supabase.from('documentos').delete().eq('id', id)
+    if (error) throw error
+  },
+
+  // Extrae la ruta dentro del bucket a partir de una URL pública de Storage
+  // (https://.../storage/v1/object/public/<bucket>/<ruta>), para poder borrar
+  // el archivo real, no solo el registro.
+  _pathDesdeUrlPublica(url: string, bucket: string): string | null {
+    const marcador = `/object/public/${bucket}/`
+    const idx = url.indexOf(marcador)
+    if (idx === -1) return null
+    return decodeURIComponent(url.slice(idx + marcador.length).split('?')[0])
+  },
+
+  // Elimina un documento por completo: la foto y el PDF en Storage, y el
+  // registro en la base de datos (el historial de auditoría se borra en
+  // cascada). Si falla la limpieza de Storage, igual se borra el registro —
+  // no queremos que un archivo huérfano bloquee que el documento desaparezca.
+  async eliminarDocumentoCompleto(doc: { id: string; foto_url?: string | null; pdf_url?: string | null }) {
+    const bucket = 'documentos'
+    const paths = [doc.foto_url, doc.pdf_url]
+      .map((u) => (u ? db._pathDesdeUrlPublica(u, bucket) : null))
+      .filter((p): p is string => !!p)
+
+    if (paths.length > 0) {
+      try {
+        await storage.eliminarArchivos(bucket, paths)
+      } catch (err) {
+        console.error('No se pudieron borrar los archivos en Storage:', err)
+      }
+    }
+
+    const { error } = await supabase.from('documentos').delete().eq('id', doc.id)
+    if (error) throw error
+  },
+
+  // Invalida el compilado guardado en caché de un día (se usa cuando se borra
+  // algún documento de ese día, para que el próximo QR/PDF se regenere sin
+  // el documento eliminado en vez de reusar el compilado desactualizado).
+  async invalidarCompiladoDia(contratoId: string, fecha: string) {
+    const { error } = await supabase
+      .from('compilados_dia')
+      .delete()
+      .eq('contrato_id', contratoId)
+      .eq('fecha', fecha)
+
     if (error) throw error
   },
 

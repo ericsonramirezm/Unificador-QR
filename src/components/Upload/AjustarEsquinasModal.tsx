@@ -5,6 +5,7 @@ import {
   Punto,
   areaCuadrilatero,
   cargarImagenDesdeBlob,
+  detectarEsquinasAutomaticas,
   escanearDocumento,
   esquinasPorDefecto,
 } from '@lib/escaneoDocumento'
@@ -37,15 +38,19 @@ export const AjustarEsquinasModal = ({
   const [arrastrando, setArrastrando] = useState<NombreEsquina | null>(null)
   const [procesando, setProcesando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deteccionAutomatica, setDeteccionAutomatica] = useState(false)
 
-  // Al recibir una foto nueva: cargarla, calcular esquinas por defecto y
-  // preparar su preview para mostrarla en el contenedor.
+  // Al recibir una foto nueva: cargarla, intentar detectar automáticamente
+  // los bordes del documento ("smart scan") y, si no hay suficiente
+  // confianza, usar una posición inicial por defecto. En ambos casos el
+  // usuario puede corregir arrastrando las esquinas.
   useEffect(() => {
     if (!imagenFile) {
       setImagenCargada(null)
       setPreviewUrl(null)
       setEsquinas(null)
       setError(null)
+      setDeteccionAutomatica(false)
       return
     }
 
@@ -56,7 +61,9 @@ export const AjustarEsquinasModal = ({
         if (cancelado) return
         setImagenCargada(img)
         setPreviewUrl(img.src)
-        setEsquinas(esquinasPorDefecto(img.naturalWidth, img.naturalHeight))
+        const detectadas = detectarEsquinasAutomaticas(img)
+        setDeteccionAutomatica(detectadas !== null)
+        setEsquinas(detectadas ?? esquinasPorDefecto(img.naturalWidth, img.naturalHeight))
       })
       .catch(() => {
         if (!cancelado) setError('No se pudo cargar la foto capturada')
@@ -155,7 +162,9 @@ export const AjustarEsquinasModal = ({
             </button>
           </div>
           <p className="text-xs text-slate-500 mb-4">
-            Arrastra las esquinas para que coincidan con los bordes del documento.
+            {deteccionAutomatica
+              ? 'Detectamos el documento automáticamente. Ajusta las esquinas si es necesario.'
+              : 'No pudimos detectar el documento automáticamente — ajusta las esquinas sobre sus bordes.'}
             {restantes > 0 && ` Quedan ${restantes} foto${restantes > 1 ? 's' : ''} más por ajustar.`}
           </p>
 

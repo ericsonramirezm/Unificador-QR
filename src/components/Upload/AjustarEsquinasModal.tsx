@@ -39,11 +39,14 @@ export const AjustarEsquinasModal = ({
   const [procesando, setProcesando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deteccionAutomatica, setDeteccionAutomatica] = useState(false)
+  const [detectando, setDetectando] = useState(false)
 
-  // Al recibir una foto nueva: cargarla, intentar detectar automáticamente
-  // los bordes del documento ("smart scan") y, si no hay suficiente
-  // confianza, usar una posición inicial por defecto. En ambos casos el
-  // usuario puede corregir arrastrando las esquinas.
+  // Al recibir una foto nueva: cargarla y mostrarla de inmediato con una
+  // posición inicial por defecto (para no dejar al usuario esperando), y en
+  // paralelo intentar detectar automáticamente los bordes del documento
+  // ("smart scan" con OpenCV.js, que puede tardar unos segundos la primera
+  // vez mientras se descarga) — si encuentra algo confiable, las esquinas
+  // "saltan" a esa posición. El usuario siempre puede corregir arrastrando.
   useEffect(() => {
     if (!imagenFile) {
       setImagenCargada(null)
@@ -51,19 +54,34 @@ export const AjustarEsquinasModal = ({
       setEsquinas(null)
       setError(null)
       setDeteccionAutomatica(false)
+      setDetectando(false)
       return
     }
 
     let cancelado = false
     setError(null)
+    setDeteccionAutomatica(false)
     cargarImagenDesdeBlob(imagenFile)
       .then((img) => {
         if (cancelado) return
         setImagenCargada(img)
         setPreviewUrl(img.src)
-        const detectadas = detectarEsquinasAutomaticas(img)
-        setDeteccionAutomatica(detectadas !== null)
-        setEsquinas(detectadas ?? esquinasPorDefecto(img.naturalWidth, img.naturalHeight))
+        setEsquinas(esquinasPorDefecto(img.naturalWidth, img.naturalHeight))
+
+        setDetectando(true)
+        detectarEsquinasAutomaticas(img)
+          .then((detectadas) => {
+            if (cancelado || !detectadas) return
+            setDeteccionAutomatica(true)
+            setEsquinas(detectadas)
+          })
+          .catch(() => {
+            // Sin confianza suficiente o sin OpenCV disponible: se queda con
+            // el recuadro por defecto ya mostrado, sin interrumpir al usuario.
+          })
+          .finally(() => {
+            if (!cancelado) setDetectando(false)
+          })
       })
       .catch(() => {
         if (!cancelado) setError('No se pudo cargar la foto capturada')
@@ -162,9 +180,11 @@ export const AjustarEsquinasModal = ({
             </button>
           </div>
           <p className="text-xs text-slate-500 mb-4">
-            {deteccionAutomatica
-              ? 'Detectamos el documento automáticamente. Ajusta las esquinas si es necesario.'
-              : 'No pudimos detectar el documento automáticamente — ajusta las esquinas sobre sus bordes.'}
+            {detectando
+              ? 'Analizando documento...'
+              : deteccionAutomatica
+                ? 'Detectamos el documento automáticamente. Ajusta las esquinas si es necesario.'
+                : 'No pudimos detectar el documento automáticamente — ajusta las esquinas sobre sus bordes.'}
             {restantes > 0 && ` Quedan ${restantes} foto${restantes > 1 ? 's' : ''} más por ajustar.`}
           </p>
 

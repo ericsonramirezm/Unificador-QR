@@ -1,6 +1,10 @@
 // Escaneo estilo CamScanner: recorte + enderezado de perspectiva + mejora de
-// color, todo en Canvas2D puro (sin opencv.js ni ninguna librería de visión
-// por computador — ver contexto en el plan de esta funcionalidad).
+// color. El recorte/enderezado/mejora es Canvas2D puro; la detección
+// automática de esquinas usa OpenCV.js (ver detectarEsquinasAutomaticas más
+// abajo) — se probó primero una heurística hecha a mano para evitar los ~8MB
+// de esa librería, pero fallaba en fotos reales con poca luz o fondo con
+// textura, así que se reemplazó por detección de contornos real.
+import { obtenerOpenCV } from '@lib/opencv'
 
 export interface Punto {
   x: number
@@ -29,165 +33,16 @@ export function esquinasPorDefecto(anchoImg: number, altoImg: number): EsquinasD
 
 // --- Detección automática de bordes ("smart scan") ---
 //
-// Sin librería de visión por computador (ver contexto: opencv.js pesa ~8MB y
-// no conviene para uso en terreno). En su lugar: gradiente de Sobel + umbral
-// adaptativo para encontrar píxeles de borde, un muestreo por sector angular
-// (para acotar cuántos puntos entran al cierre convexo sin importar cuántos
-// píxeles de borde haya), cierre convexo (monotone chain), reducción del
-// cierre convexo a 4 vértices (eliminando iterativamente el vértice que
-// menos área aporta, estilo Visvalingam-Whyatt), y ordenamiento de esquinas
-// por la técnica estándar suma/diferencia. Es un "mejor esfuerzo": si la
-// imagen no tiene suficiente contraste entre el papel y el fondo, devuelve
-// null y quien llama debe usar `esquinasPorDefecto` como respaldo — el
+// Primero se probó una heurística hecha a mano (gradiente de Sobel + Otsu +
+// cierre convexo) para evitar los ~8MB de OpenCV.js — funcionaba bien en
+// pruebas sintéticas, pero falló en fotos reales con poca luz y fondo con
+// textura (encontraba un cuadrilátero cercano a los bordes de toda la foto,
+// no del documento). Se reemplazó por detección de contornos real con
+// OpenCV.js, cargado de forma perezosa (ver @lib/opencv) para que ese peso
+// solo lo paguen Supervisor/APR al abrir el modal de escaneo, nunca el resto
+// de la app. Es un "mejor esfuerzo": si no encuentra un cuadrilátero
+// confiable, devuelve null y quien llama debe usar `esquinasPorDefecto` — el
 // usuario siempre puede corregir arrastrando las esquinas en el modal.
-
-interface PuntoConDistancia extends Punto {
-  dist: number
-}
-
-function aGrises(canvas: HTMLCanvasElement): Float32Array {
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('No se pudo preparar el lienzo para detectar bordes')
-  const { width: w, height: h } = canvas
-  const datosImagen = ctx.getImageData(0, 0, w, h).data
-  const gris = new Float32Array(w * h)
-  for (let i = 0, p = 0; i < datosImagen.length; i += 4, p++) {
-    gris[p] = 0.299 * datosImagen[i] + 0.587 * datosImagen[i + 1] + 0.114 * datosImagen[i + 2]
-  }
-  return gris
-}
-
-// Desenfoque de caja separable (horizontal + vertical), O(w*h) sin importar
-// el radio. Se aplica antes del Sobel para que texturas de fondo (madera,
-// tela, ruido del sensor) no generen gradientes tan fuertes como el borde
-// real del documento — sin este paso, un fondo con textura puede "ganarle"
-// al borde de la hoja y arruinar la detección.
-function desenfoqueCaja(datos: Float32Array, w: number, h: number, radio: number): Float32Array {
-  const temp = new Float32Array(w * h)
-  const salida = new Float32Array(w * h)
-  const norm = 2 * radio + 1
-
-  for (let y = 0; y < h; y++) {
-    let suma = 0
-    for (let x = -radio; x <= radio; x++) {
-      const xx = Math.min(w - 1, Math.max(0, x))
-      suma += datos[y * w + xx]
-    }
-    for (let x = 0; x < w; x++) {
-      temp[y * w + x] = suma / norm
-      const xxOut = Math.min(w - 1, Math.max(0, x - radio))
-      const xxIn = Math.min(w - 1, Math.max(0, x + radio + 1))
-      suma += datos[y * w + xxIn] - datos[y * w + xxOut]
-    }
-  }
-
-  for (let x = 0; x < w; x++) {
-    let suma = 0
-    for (let y = -radio; y <= radio; y++) {
-      const yy = Math.min(h - 1, Math.max(0, y))
-      suma += temp[yy * w + x]
-    }
-    for (let y = 0; y < h; y++) {
-      salida[y * w + x] = suma / norm
-      const yyOut = Math.min(h - 1, Math.max(0, y - radio))
-      const yyIn = Math.min(h - 1, Math.max(0, y + radio + 1))
-      suma += temp[yyIn * w + x] - temp[yyOut * w + x]
-    }
-  }
-
-  return salida
-}
-
-function magnitudSobel(gris: Float32Array, w: number, h: number): Float32Array {
-  const mag = new Float32Array(w * h)
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x
-      const gx =
-        -gris[i - w - 1] +
-        gris[i - w + 1] -
-        2 * gris[i - 1] +
-        2 * gris[i + 1] -
-        gris[i + w - 1] +
-        gris[i + w + 1]
-      const gy =
-        -gris[i - w - 1] -
-        2 * gris[i - w] -
-        gris[i - w + 1] +
-        gris[i + w - 1] +
-        2 * gris[i + w] +
-        gris[i + w + 1]
-      mag[i] = Math.abs(gx) + Math.abs(gy)
-    }
-  }
-  return mag
-}
-
-function cruz(o: Punto, a: Punto, b: Punto): number {
-  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-}
-
-// Cierre convexo por "monotone chain" (Andrew), O(n log n).
-function cierreConvexo(puntos: Punto[]): Punto[] {
-  const pts = [...puntos].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x))
-  const n = pts.length
-  if (n < 3) return pts
-
-  const inferior: Punto[] = []
-  for (const p of pts) {
-    while (
-      inferior.length >= 2 &&
-      cruz(inferior[inferior.length - 2], inferior[inferior.length - 1], p) <= 0
-    ) {
-      inferior.pop()
-    }
-    inferior.push(p)
-  }
-
-  const superior: Punto[] = []
-  for (let i = n - 1; i >= 0; i--) {
-    const p = pts[i]
-    while (
-      superior.length >= 2 &&
-      cruz(superior[superior.length - 2], superior[superior.length - 1], p) <= 0
-    ) {
-      superior.pop()
-    }
-    superior.push(p)
-  }
-
-  inferior.pop()
-  superior.pop()
-  return inferior.concat(superior)
-}
-
-function areaTriangulo(a: Punto, b: Punto, c: Punto): number {
-  return Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2
-}
-
-// Reduce un polígono convexo a 4 vértices eliminando repetidamente el que
-// menos área "recorta" (el de menor triángulo con sus 2 vecinos) — conserva
-// mejor la forma original que quedarse con 4 puntos arbitrarios.
-function reducirACuadrilatero(hull: Punto[]): Punto[] {
-  const puntos = [...hull]
-  while (puntos.length > 4) {
-    let idxMenor = 0
-    let areaMenor = Infinity
-    const n = puntos.length
-    for (let i = 0; i < n; i++) {
-      const prev = puntos[(i - 1 + n) % n]
-      const actual = puntos[i]
-      const next = puntos[(i + 1) % n]
-      const area = areaTriangulo(prev, actual, next)
-      if (area < areaMenor) {
-        areaMenor = area
-        idxMenor = i
-      }
-    }
-    puntos.splice(idxMenor, 1)
-  }
-  return puntos
-}
 
 // Ordena 4 puntos como TL/TR/BR/BL vía la técnica estándar suma/diferencia:
 // TL tiene la menor (x+y), BR la mayor; TR tiene la menor (y-x), BL la mayor.
@@ -202,12 +57,31 @@ function ordenarEsquinas(puntos: Punto[]): EsquinasDocumento {
   }
 }
 
-// Intenta detectar automáticamente las 4 esquinas del documento fotografiado.
-// Devuelve null si no hay suficiente confianza (imagen plana/sin contraste,
-// muy pocos bordes detectados, o el área resultante es demasiado pequeña) —
-// en ese caso quien llama debe usar `esquinasPorDefecto`.
-export function detectarEsquinasAutomaticas(img: HTMLImageElement): EsquinasDocumento | null {
-  const LADO_TRABAJO = 500
+// Mediana de brillo de una imagen en escala de grises (histograma de 256
+// valores) — se usa para calcular umbrales de Canny automáticos ("auto
+// Canny"), que se adaptan a la iluminación real de cada foto en vez de un
+// umbral fijo que funciona en unas fotos y falla en otras más oscuras.
+function medianaGrises(mat: any): number {
+  const datos: Uint8Array = mat.data
+  const hist = new Uint32Array(256)
+  for (let i = 0; i < datos.length; i++) hist[datos[i]]++
+  const mitad = datos.length / 2
+  let acumulado = 0
+  for (let v = 0; v < 256; v++) {
+    acumulado += hist[v]
+    if (acumulado >= mitad) return v
+  }
+  return 128
+}
+
+// Intenta detectar automáticamente las 4 esquinas del documento fotografiado
+// vía OpenCV.js: gris -> desenfoque -> Canny (umbrales automáticos según el
+// brillo de la foto) -> dilatación (cierra pequeños huecos en el borde) ->
+// contornos -> el cuadrilátero convexo de mayor área. Devuelve null si no
+// hay suficiente confianza (contorno muy chico, o ninguno de 4 lados) — en
+// ese caso quien llama debe usar `esquinasPorDefecto` como respaldo.
+export async function detectarEsquinasAutomaticas(img: HTMLImageElement): Promise<EsquinasDocumento | null> {
+  const LADO_TRABAJO = 800
   const lado = Math.max(img.naturalWidth, img.naturalHeight)
   const factor = lado > LADO_TRABAJO ? LADO_TRABAJO / lado : 1
   const w = Math.round(img.naturalWidth * factor)
@@ -223,95 +97,89 @@ export function detectarEsquinasAutomaticas(img: HTMLImageElement): EsquinasDocu
   // EXIF al decodificar `img` — no se toca ninguna rotación manual aquí.
   ctx.drawImage(img, 0, 0, w, h)
 
-  const gris = aGrises(canvas)
-  // Radio 3 (caja 7x7) probado contra fondos con textura fuerte — buen
-  // equilibrio entre suprimir ruido y no perder el borde real del documento.
-  const grisSuavizado = desenfoqueCaja(gris, w, h, 3)
-  const mag = magnitudSobel(grisSuavizado, w, h)
-
-  let maxMag = 0
-  for (let i = 0; i < mag.length; i++) if (mag[i] > maxMag) maxMag = mag[i]
-  if (maxMag < 5) return null // imagen prácticamente plana, sin bordes detectables
-
-  // Umbral automático por el método de Otsu (maximiza la varianza entre las
-  // dos clases "fondo" vs "borde" del histograma de magnitudes). Es más
-  // robusto que un percentil fijo: la proporción real de píxeles de borde
-  // varía mucho según cuánto del encuadre ocupa el documento — un percentil
-  // fijo (ej. "top 8%") falla cuando los bordes reales son una fracción
-  // mucho menor de la imagen (el umbral termina cerca de 0 y "detecta" el
-  // borde del lienzo completo en vez del documento).
-  const bins = 256
-  const hist = new Uint32Array(bins)
-  for (let i = 0; i < mag.length; i++) {
-    hist[Math.min(bins - 1, Math.floor((mag[i] / maxMag) * (bins - 1)))]++
+  let cv: any
+  try {
+    cv = await obtenerOpenCV()
+  } catch {
+    return null // sin OpenCV disponible (ej. sin red la primera vez) -> respaldo
   }
-  const total = mag.length
-  let sumaTotal = 0
-  for (let b = 0; b < bins; b++) sumaTotal += b * hist[b]
 
-  let sumaFondo = 0
-  let pesoFondo = 0
-  let mejorVarianza = -1
-  let binUmbral = 0
-  for (let b = 0; b < bins; b++) {
-    pesoFondo += hist[b]
-    if (pesoFondo === 0) continue
-    const pesoBorde = total - pesoFondo
-    if (pesoBorde === 0) break
-    sumaFondo += b * hist[b]
-    const mediaFondo = sumaFondo / pesoFondo
-    const mediaBorde = (sumaTotal - sumaFondo) / pesoBorde
-    const varianza = pesoFondo * pesoBorde * (mediaFondo - mediaBorde) ** 2
-    if (varianza > mejorVarianza) {
-      mejorVarianza = varianza
-      binUmbral = b
+  const src = cv.imread(canvas)
+  const gray = new cv.Mat()
+  const blurred = new cv.Mat()
+  const edges = new cv.Mat()
+  const dilated = new cv.Mat()
+  const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3))
+  const contours = new cv.MatVector()
+  const hierarchy = new cv.Mat()
+
+  let resultado: EsquinasDocumento | null = null
+
+  try {
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0)
+
+    // Umbrales de Canny automáticos ("auto Canny") según la mediana de
+    // brillo de esta foto en particular, en vez de un umbral fijo.
+    const mediana = medianaGrises(blurred)
+    const sigma = 0.33
+    const inferior = Math.max(0, (1 - sigma) * mediana)
+    const superior = Math.min(255, (1 + sigma) * mediana)
+    cv.Canny(blurred, edges, inferior, superior)
+    cv.dilate(edges, dilated, kernel)
+
+    cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
+
+    let mejorArea = w * h * 0.15 // mismo umbral de confianza que el algoritmo anterior
+    let mejorPuntos: Punto[] | null = null
+
+    for (let i = 0; i < contours.size(); i++) {
+      const contorno = contours.get(i)
+      const area = cv.contourArea(contorno)
+
+      if (area > mejorArea) {
+        const perimetro = cv.arcLength(contorno, true)
+        const approx = new cv.Mat()
+        cv.approxPolyDP(contorno, approx, 0.02 * perimetro, true)
+
+        if (approx.rows === 4 && cv.isContourConvex(approx)) {
+          mejorArea = area
+          mejorPuntos = [
+            { x: approx.data32S[0], y: approx.data32S[1] },
+            { x: approx.data32S[2], y: approx.data32S[3] },
+            { x: approx.data32S[4], y: approx.data32S[5] },
+            { x: approx.data32S[6], y: approx.data32S[7] },
+          ]
+        }
+        approx.delete()
+      }
+      contorno.delete()
     }
-  }
-  const umbral = (binUmbral / (bins - 1)) * maxMag
 
-  // Un punto por sector angular (el más lejano del centro) — acota el cierre
-  // convexo a como mucho `SECTORES` puntos sin importar cuántos píxeles de
-  // borde haya, y se aproxima bien a la silueta exterior del documento.
-  const cx = w / 2
-  const cy = h / 2
-  const SECTORES = 120
-  const mejores = new Array<PuntoConDistancia | null>(SECTORES).fill(null)
-
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x
-      if (mag[i] < umbral) continue
-      const dx = x - cx
-      const dy = y - cy
-      const dist = dx * dx + dy * dy
-      const angulo = Math.atan2(dy, dx) + Math.PI
-      const sector = Math.min(SECTORES - 1, Math.floor((angulo / (2 * Math.PI)) * SECTORES))
-      const actual = mejores[sector]
-      if (!actual || dist > actual.dist) {
-        mejores[sector] = { x, y, dist }
+    if (mejorPuntos) {
+      const ordenado = ordenarEsquinas(mejorPuntos)
+      const inv = 1 / factor
+      resultado = {
+        tl: { x: ordenado.tl.x * inv, y: ordenado.tl.y * inv },
+        tr: { x: ordenado.tr.x * inv, y: ordenado.tr.y * inv },
+        br: { x: ordenado.br.x * inv, y: ordenado.br.y * inv },
+        bl: { x: ordenado.bl.x * inv, y: ordenado.bl.y * inv },
       }
     }
+  } finally {
+    // Las Mat de OpenCV.js viven en memoria WASM y no tienen recolector de
+    // basura automático — hay que liberarlas explícitamente o se acumulan.
+    src.delete()
+    gray.delete()
+    blurred.delete()
+    edges.delete()
+    dilated.delete()
+    kernel.delete()
+    contours.delete()
+    hierarchy.delete()
   }
 
-  const puntos: Punto[] = mejores.filter((p): p is PuntoConDistancia => p !== null)
-  if (puntos.length < 8) return null // muy pocos bordes detectados, sin confianza
-
-  const hull = cierreConvexo(puntos)
-  if (hull.length < 4) return null
-
-  const cuadrilatero = reducirACuadrilatero(hull)
-  const ordenado = ordenarEsquinas(cuadrilatero)
-
-  if (areaCuadrilatero(ordenado) < w * h * 0.15) return null // área poco confiable
-
-  const inv = 1 / factor
-  const reescalar = (p: Punto): Punto => ({ x: p.x * inv, y: p.y * inv })
-  return {
-    tl: reescalar(ordenado.tl),
-    tr: reescalar(ordenado.tr),
-    br: reescalar(ordenado.br),
-    bl: reescalar(ordenado.bl),
-  }
+  return resultado
 }
 
 // Igual patrón que girarArchivo.ts/usePDFGenerator.ts: FileReader -> Image.

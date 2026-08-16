@@ -1,10 +1,11 @@
 // Escaneo estilo CamScanner: recorte + enderezado de perspectiva + mejora de
 // color. El recorte/enderezado/mejora es Canvas2D puro; la detección
-// automática de esquinas usa OpenCV.js (ver detectarEsquinasAutomaticas más
-// abajo) — se probó primero una heurística hecha a mano para evitar los ~8MB
-// de esa librería, pero fallaba en fotos reales con poca luz o fondo con
-// textura, así que se reemplazó por detección de contornos real.
-import { obtenerOpenCV } from '@lib/opencv'
+// automática de esquinas usa OpenCV.js corriendo en un Web Worker (ver
+// detectarEsquinasAutomaticas más abajo y @lib/opencv) — se probó primero
+// una heurística hecha a mano para evitar los ~8MB de esa librería, pero
+// fallaba en fotos reales con poca luz o fondo con textura, así que se
+// reemplazó por detección de contornos real.
+import { detectarEnWorker } from '@lib/opencv'
 
 export interface Punto {
   x: number
@@ -38,48 +39,14 @@ export function esquinasPorDefecto(anchoImg: number, altoImg: number): EsquinasD
 // pruebas sintéticas, pero falló en fotos reales con poca luz y fondo con
 // textura (encontraba un cuadrilátero cercano a los bordes de toda la foto,
 // no del documento). Se reemplazó por detección de contornos real con
-// OpenCV.js, cargado de forma perezosa (ver @lib/opencv) para que ese peso
-// solo lo paguen Supervisor/APR al abrir el modal de escaneo, nunca el resto
-// de la app. Es un "mejor esfuerzo": si no encuentra un cuadrilátero
-// confiable, devuelve null y quien llama debe usar `esquinasPorDefecto` — el
-// usuario siempre puede corregir arrastrando las esquinas en el modal.
-
-// Ordena 4 puntos como TL/TR/BR/BL vía la técnica estándar suma/diferencia:
-// TL tiene la menor (x+y), BR la mayor; TR tiene la menor (y-x), BL la mayor.
-function ordenarEsquinas(puntos: Punto[]): EsquinasDocumento {
-  const porSuma = [...puntos].sort((a, b) => a.x + a.y - (b.x + b.y))
-  const porDiferencia = [...puntos].sort((a, b) => a.y - a.x - (b.y - b.x))
-  return {
-    tl: porSuma[0],
-    br: porSuma[porSuma.length - 1],
-    tr: porDiferencia[0],
-    bl: porDiferencia[porDiferencia.length - 1],
-  }
-}
-
-// Mediana de brillo de una imagen en escala de grises (histograma de 256
-// valores) — se usa para calcular umbrales de Canny automáticos ("auto
-// Canny"), que se adaptan a la iluminación real de cada foto en vez de un
-// umbral fijo que funciona en unas fotos y falla en otras más oscuras.
-function medianaGrises(mat: any): number {
-  const datos: Uint8Array = mat.data
-  const hist = new Uint32Array(256)
-  for (let i = 0; i < datos.length; i++) hist[datos[i]]++
-  const mitad = datos.length / 2
-  let acumulado = 0
-  for (let v = 0; v < 256; v++) {
-    acumulado += hist[v]
-    if (acumulado >= mitad) return v
-  }
-  return 128
-}
-
-// Intenta detectar automáticamente las 4 esquinas del documento fotografiado
-// vía OpenCV.js: gris -> desenfoque -> Canny (umbrales automáticos según el
-// brillo de la foto) -> dilatación (cierra pequeños huecos en el borde) ->
-// contornos -> el cuadrilátero convexo de mayor área. Devuelve null si no
-// hay suficiente confianza (contorno muy chico, o ninguno de 4 lados) — en
-// ese caso quien llama debe usar `esquinasPorDefecto` como respaldo.
+// OpenCV.js. La detección en sí (gris -> desenfoque -> Canny -> dilatación
+// -> contornos -> cuadrilátero de mayor área) corre en un Web Worker (ver
+// @lib/opencv y opencv.worker.ts) — al probarla corriendo en el hilo
+// principal, en un celular real la inicialización del WASM dejaba el modal
+// completamente congelado. Es un "mejor esfuerzo": si no encuentra un
+// cuadrilátero confiable (o el worker se demora demasiado), devuelve null y
+// quien llama debe usar `esquinasPorDefecto` — el usuario siempre puede
+// corregir arrastrando las esquinas en el modal.
 export async function detectarEsquinasAutomaticas(img: HTMLImageElement): Promise<EsquinasDocumento | null> {
   const LADO_TRABAJO = 800
   const lado = Math.max(img.naturalWidth, img.naturalHeight)
@@ -96,90 +63,23 @@ export async function detectarEsquinasAutomaticas(img: HTMLImageElement): Promis
   // Único drawImage plano del original: el navegador ya aplicó la corrección
   // EXIF al decodificar `img` — no se toca ninguna rotación manual aquí.
   ctx.drawImage(img, 0, 0, w, h)
+  const imageData = ctx.getImageData(0, 0, w, h)
 
-  let cv: any
+  let detectado
   try {
-    cv = await obtenerOpenCV()
+    detectado = await detectarEnWorker(imageData)
   } catch {
-    return null // sin OpenCV disponible (ej. sin red la primera vez) -> respaldo
+    return null
   }
+  if (!detectado) return null
 
-  const src = cv.imread(canvas)
-  const gray = new cv.Mat()
-  const blurred = new cv.Mat()
-  const edges = new cv.Mat()
-  const dilated = new cv.Mat()
-  const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3))
-  const contours = new cv.MatVector()
-  const hierarchy = new cv.Mat()
-
-  let resultado: EsquinasDocumento | null = null
-
-  try {
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
-    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0)
-
-    // Umbrales de Canny automáticos ("auto Canny") según la mediana de
-    // brillo de esta foto en particular, en vez de un umbral fijo.
-    const mediana = medianaGrises(blurred)
-    const sigma = 0.33
-    const inferior = Math.max(0, (1 - sigma) * mediana)
-    const superior = Math.min(255, (1 + sigma) * mediana)
-    cv.Canny(blurred, edges, inferior, superior)
-    cv.dilate(edges, dilated, kernel)
-
-    cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
-
-    let mejorArea = w * h * 0.15 // mismo umbral de confianza que el algoritmo anterior
-    let mejorPuntos: Punto[] | null = null
-
-    for (let i = 0; i < contours.size(); i++) {
-      const contorno = contours.get(i)
-      const area = cv.contourArea(contorno)
-
-      if (area > mejorArea) {
-        const perimetro = cv.arcLength(contorno, true)
-        const approx = new cv.Mat()
-        cv.approxPolyDP(contorno, approx, 0.02 * perimetro, true)
-
-        if (approx.rows === 4 && cv.isContourConvex(approx)) {
-          mejorArea = area
-          mejorPuntos = [
-            { x: approx.data32S[0], y: approx.data32S[1] },
-            { x: approx.data32S[2], y: approx.data32S[3] },
-            { x: approx.data32S[4], y: approx.data32S[5] },
-            { x: approx.data32S[6], y: approx.data32S[7] },
-          ]
-        }
-        approx.delete()
-      }
-      contorno.delete()
-    }
-
-    if (mejorPuntos) {
-      const ordenado = ordenarEsquinas(mejorPuntos)
-      const inv = 1 / factor
-      resultado = {
-        tl: { x: ordenado.tl.x * inv, y: ordenado.tl.y * inv },
-        tr: { x: ordenado.tr.x * inv, y: ordenado.tr.y * inv },
-        br: { x: ordenado.br.x * inv, y: ordenado.br.y * inv },
-        bl: { x: ordenado.bl.x * inv, y: ordenado.bl.y * inv },
-      }
-    }
-  } finally {
-    // Las Mat de OpenCV.js viven en memoria WASM y no tienen recolector de
-    // basura automático — hay que liberarlas explícitamente o se acumulan.
-    src.delete()
-    gray.delete()
-    blurred.delete()
-    edges.delete()
-    dilated.delete()
-    kernel.delete()
-    contours.delete()
-    hierarchy.delete()
+  const inv = 1 / factor
+  return {
+    tl: { x: detectado.tl.x * inv, y: detectado.tl.y * inv },
+    tr: { x: detectado.tr.x * inv, y: detectado.tr.y * inv },
+    br: { x: detectado.br.x * inv, y: detectado.br.y * inv },
+    bl: { x: detectado.bl.x * inv, y: detectado.bl.y * inv },
   }
-
-  return resultado
 }
 
 // Igual patrón que girarArchivo.ts/usePDFGenerator.ts: FileReader -> Image.

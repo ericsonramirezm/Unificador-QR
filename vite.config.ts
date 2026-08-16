@@ -13,6 +13,14 @@ export default defineConfig({
     sourcemap: false,
     minify: 'esbuild'
   },
+  worker: {
+    // El worker de OpenCV.js (ver src/lib/opencv.worker.ts) usa
+    // importScripts() para cargar el UMD del paquete, igual que el <script>
+    // que se usa en el hilo principal (ver opencv.ts) — importScripts solo
+    // existe en workers "clásicos", no en workers de módulo, así que se fija
+    // el formato explícitamente en vez de depender del valor por defecto.
+    format: 'iife'
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

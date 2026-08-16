@@ -186,6 +186,18 @@ export const db = {
     return data
   },
 
+  // Crea la fila de perfil para un usuario que el Coordinador ya creó en
+  // Supabase (Authentication > Users) — Supabase Auth por sí solo no crea
+  // esta fila, así que sin este paso ese usuario no puede usar la app. El
+  // `id` debe ser el UID que Supabase le asignó a esa cuenta. Usa la
+  // política RLS "coordinador_crear_usuarios" ya existente (permite insertar
+  // cualquier fila, con cualquier rol, solo si quien llama es Coordinador).
+  async crearUsuario(usuario: { id: string; nombre: string; email: string; rol: UserRole }) {
+    const { data, error } = await supabase.from('usuarios').insert([usuario]).select().single()
+    if (error) throw error
+    return data
+  },
+
   // Contratos
   async getContratoActivo() {
     const { data, error } = await supabase

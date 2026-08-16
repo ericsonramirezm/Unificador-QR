@@ -8,6 +8,7 @@ import { formatearCargo } from '@lib/formato'
 import { ordenarDocumentos } from '@lib/orden'
 import { girarPaginasPDF, girarImagen } from '@lib/girarArchivo'
 import { CameraUpload } from '@components/Upload/CameraUpload'
+import { RelojPasillo } from '@components/DocumentList/RelojPasillo'
 
 interface DocumentListProps {
   usuario?: Usuario
@@ -465,15 +466,19 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
           </p>
         </div>
 
-        {puedeCargar && contrato && (
-          <button
-            type="button"
-            onClick={() => setMostrarCarga(true)}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700"
-          >
-            📷 Cargar documentos
-          </button>
-        )}
+        <div className="flex items-center gap-4">
+          {esCoordinador && <RelojPasillo />}
+
+          {puedeCargar && contrato && (
+            <button
+              type="button"
+              onClick={() => setMostrarCarga(true)}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700"
+            >
+              📷 Cargar documentos
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filtro */}

@@ -353,4 +353,95 @@ export const db = {
     if (error) throw error
     return data
   },
+
+  // ============ PARTE DIARIO ============
+  // Tablas separadas de las de Documentos QR (add_partes_diarios.sql) —
+  // comparten solo "usuarios" y "contratos". Ver ARQUITECTURA.md.
+
+  async obtenerSiguienteNumeroParte(contratoId: string): Promise<number> {
+    const { data, error } = await supabase.rpc('obtener_siguiente_numero_parte', {
+      p_contrato_id: contratoId,
+    })
+    if (error) throw error
+    return data as number
+  },
+
+  // El último parte del contrato ya trae, en sus columnas *_acumuladas, la
+  // suma de todos los anteriores — así que el acumulado del parte nuevo es
+  // "el de este + lo que traiga este mismo objeto" (ver nota en la migración).
+  async obtenerUltimoParteDiario(contratoId: string) {
+    const { data, error } = await supabase
+      .from('partes_diarios')
+      .select('hh_directas_acumuladas, hm_acumuladas, hh_indirectas_acumuladas')
+      .eq('contrato_id', contratoId)
+      .order('fecha', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) throw error
+    return data
+  },
+
+  async crearParteDiario(parte: any) {
+    const { data, error } = await supabase
+      .from('partes_diarios')
+      .insert([parte])
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  },
+
+  async actualizarParteDiario(id: string, updates: any) {
+    const { data, error } = await supabase
+      .from('partes_diarios')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  },
+
+  async obtenerPartesDiarios(contratoId: string) {
+    const { data, error } = await supabase
+      .from('partes_diarios')
+      .select('*, usuario_creador:creado_por(nombre, email, rol)')
+      .eq('contrato_id', contratoId)
+      .order('fecha', { ascending: false })
+
+    if (error) throw error
+    return data
+  },
+
+  async obtenerParteDiario(id: string) {
+    const { data, error } = await supabase
+      .from('partes_diarios')
+      .select('*, usuario_creador:creado_por(nombre, email, rol)')
+      .eq('id', id)
+      .single()
+
+    if (error) throw error
+    return data
+  },
+
+  async comentarComoMandante(id: string, comentario: string, autor: string, usuarioId: string) {
+    const { data, error } = await supabase
+      .from('partes_diarios')
+      .update({
+        comentario_mandante: comentario,
+        comentario_mandante_autor: autor,
+        comentario_mandante_por: usuarioId,
+        comentario_mandante_fecha: new Date().toISOString(),
+        estado: 'comentado_mandante',
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  },
 }

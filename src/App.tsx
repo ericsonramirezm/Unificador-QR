@@ -4,13 +4,16 @@ import { Layout } from '@components/Layout/Layout'
 import { DocumentList } from '@components/DocumentList/DocumentList'
 import { HistorialAprobados } from '@components/History/HistorialAprobados'
 import { GestionUsuarios } from '@components/Users/GestionUsuarios'
+import { ParteDiarioList } from '@components/ParteDiario/ParteDiarioList'
 import { Usuario, UserRole } from '@/types/index'
 import { auth, db } from '@lib/supabase'
 
 export function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [activeView, setActiveView] = useState<'documentos' | 'config' | 'historial' | 'usuarios'>('documentos')
+  const [activeView, setActiveView] = useState<'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'>(
+    'documentos'
+  )
   const [contratoActivo, setContratoActivo] = useState<any>(null)
 
   useEffect(() => {
@@ -87,6 +90,10 @@ export function App() {
 
       {activeView === 'usuarios' && usuario.rol === UserRole.COORDINADOR && (
         <GestionUsuarios usuario={usuario} />
+      )}
+
+      {activeView === 'parte-diario' && (
+        <ParteDiarioList usuario={usuario} contrato={contratoActivo} />
       )}
 
       {activeView === 'config' && (

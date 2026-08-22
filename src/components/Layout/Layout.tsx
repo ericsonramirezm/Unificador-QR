@@ -2,7 +2,7 @@ import { Usuario, UserRole } from '@/types/index'
 import { auth } from '@lib/supabase'
 import { useState } from 'react'
 
-type Vista = 'documentos' | 'config' | 'historial' | 'usuarios'
+type Vista = 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'
 
 interface LayoutProps {
   usuario: Usuario | null
@@ -83,6 +83,17 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
               expanded={navExpanded}
             />
           )}
+
+          {/* Parte Diario: módulo independiente de Documentos QR — mismo
+              login, mismo layout, datos separados (ver ARQUITECTURA.md).
+              El rol "mandante" solo ve este módulo. */}
+          <NavItem
+            icon="📝"
+            label="Parte Diario"
+            active={activeView === 'parte-diario'}
+            onClick={() => onViewChange('parte-diario')}
+            expanded={navExpanded}
+          />
 
           <NavItem
             icon="⚙️"

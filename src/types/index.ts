@@ -5,6 +5,9 @@ export enum UserRole {
   APR = 'apr',
   SUPERVISOR = 'supervisor',
   CONSULTOR = 'consultor',
+  // Persona de la empresa mandante (ver contratos.mandante) que comenta/
+  // aprueba el Parte Diario después de enviado. No ve Documentos QR.
+  MANDANTE = 'mandante',
 }
 
 export enum UserStatus {
@@ -170,3 +173,113 @@ export interface FiltrosDocumento {
   hasta?: Date;
   creado_por?: string;
 }
+
+// ============ PARTE DIARIO ============
+// Ver MAPEO_CAMPOS.md (sesión de arquitectura) para el detalle celda por
+// celda del Excel que estas estructuras terminan alimentando.
+
+export enum ParteDiarioEstado {
+  BORRADOR = 'borrador',
+  ENVIADO = 'enviado',
+  COMENTADO_MANDANTE = 'comentado_mandante',
+}
+
+export interface ActividadEjecutada {
+  area: string;
+  descripcion: string;
+  cantidad: number | null;
+}
+
+export interface LineaManoObra {
+  cargo: string;
+  contratados: number;
+  operativos: number;
+  // Solo mano de obra directa reparte horas por actividad (hasta 7, Act.1..Act.7)
+  horas_por_actividad?: number[];
+}
+
+export interface LineaMaquinaria {
+  equipo: string;
+  cantidad: number;
+  mantencion: number;
+  standby: number;
+  horas_por_actividad: number[];
+}
+
+export interface Jornada {
+  inicio: string | null; // HH:mm
+  fin: string | null;
+  horas_efectivas: { entrada: string | null; salida: string | null };
+  horas_perdidas: { entrada: string | null; salida: string | null };
+}
+
+export interface FotoParteDiario {
+  url: string;
+  caption?: string;
+}
+
+export interface ParteDiario {
+  id: string;
+  contrato_id: string;
+
+  numero_reporte: number;
+  fecha: string; // YYYY-MM-DD
+  condicion_climatica?: string;
+
+  actividades: ActividadEjecutada[];
+  mano_obra_directa: LineaManoObra[];
+  mano_obra_indirecta: LineaManoObra[];
+  maquinaria: LineaMaquinaria[];
+
+  jornada?: Jornada;
+
+  hh_directas_programado: number;
+  hh_indirectas_programado: number;
+
+  hh_directas_acumuladas?: number;
+  hm_acumuladas?: number;
+  hh_indirectas_acumuladas?: number;
+
+  fotos: FotoParteDiario[];
+
+  comentario_contratista_autor?: string;
+  comentario_contratista?: string;
+
+  comentario_mandante_autor?: string;
+  comentario_mandante?: string;
+  comentario_mandante_por?: string;
+  comentario_mandante_fecha?: string;
+
+  estado: ParteDiarioEstado;
+  excel_url?: string;
+
+  creado_por: string;
+  created_at: string;
+  updated_at: string;
+
+  usuario_creador?: Usuario;
+}
+
+// Listas fijas de cargos/equipos del contrato 12501191 (ver MAPEO_CAMPOS.md).
+// Si el día de mañana hay más de un contrato con Parte Diario y su propia
+// lista de cargos, esto pasa a vivir en la tabla `contratos` (columna
+// jsonb) en vez de quedar hardcodeado acá.
+export const CARGOS_DIRECTOS = [
+  'Capataz', 'Soldador', 'Termofusionador', 'Maestro Mayor', 'Rigger',
+  'Maestro Mayor Eléctrico', 'Maestro M1', 'Maestro M2 Carpintero', 'Ayudante',
+  'Maestro Mayor Estructuras', 'Maestro 1ra Eléctrico', 'Técnico Montajista',
+] as const;
+
+export const CARGOS_INDIRECTOS = [
+  'Administrador de Contrato', 'Jefe de Oficina Técnica', 'Ingeniero de Calidad',
+  'Jefe de Terreno', 'Supervisor', 'Asesor SSOMA', 'Administrativo',
+  'Logística', 'Conductor', 'Topógrafo', 'Coordinador de Terreno',
+] as const;
+
+export const EQUIPOS_MAQUINARIA = [
+  'Camión Tolva 20 m3', 'Camión Aljibe', 'Excavadora 30 ton', 'Retroexcavadora',
+  'Mini Excavadora', 'Martillo Excavadora', 'Rodillo Compactador 10Ton',
+  'Rodillo Compactador Manual', 'Tijera Eléctrica h=5mt', 'Camión Pluma',
+  'Camión Rampla', 'Grúa 90 ton.', 'Alza Hombre 15 mt', 'Grupo Electrógeno 20kva',
+  'Generador 10kva',
+] as const;

@@ -6,7 +6,7 @@ export enum UserRole {
   SUPERVISOR = 'supervisor',
   CONSULTOR = 'consultor',
   // Persona de la empresa mandante (ver contratos.mandante) que comenta/
-  // aprueba el Parte Diario después de enviado. No ve Documentos QR.
+  // aprueba el Daily Report después de enviado. No ve Documentos QR.
   MANDANTE = 'mandante',
 }
 
@@ -261,7 +261,7 @@ export interface ParteDiario {
 }
 
 // Listas fijas de cargos/equipos del contrato 12501191 (ver MAPEO_CAMPOS.md).
-// Si el día de mañana hay más de un contrato con Parte Diario y su propia
+// Si el día de mañana hay más de un contrato con Daily Report y su propia
 // lista de cargos, esto pasa a vivir en la tabla `contratos` (columna
 // jsonb) en vez de quedar hardcodeado acá.
 export const CARGOS_DIRECTOS = [

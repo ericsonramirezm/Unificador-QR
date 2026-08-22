@@ -21,8 +21,9 @@ const COLOR_ESTADO: Record<ParteDiarioEstado, string> = {
   [ParteDiarioEstado.COMENTADO_MANDANTE]: 'bg-emerald-100 text-emerald-700',
 }
 
-const puedeCrear = (rol: UserRole) =>
-  rol === UserRole.COORDINADOR || rol === UserRole.SUPERVISOR || rol === UserRole.APR
+// El rol "supervisor" no tiene acceso al módulo Daily Report (ver
+// Layout.tsx y remove_supervisor_daily_report.sql).
+const puedeCrear = (rol: UserRole) => rol === UserRole.COORDINADOR || rol === UserRole.APR
 
 export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => {
   const [partes, setPartes] = useState<ParteDiario[]>([])
@@ -89,7 +90,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Parte Diario</h2>
+          <h2 className="text-xl font-bold text-slate-900">Daily Report</h2>
           <p className="text-sm text-slate-500">
             {contrato?.codigo} · {contrato?.nombre}
           </p>
@@ -99,7 +100,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
             onClick={() => setMostrarFormulario(true)}
             className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
           >
-            + Nuevo parte diario
+            + Nuevo Daily Report
           </button>
         )}
       </div>

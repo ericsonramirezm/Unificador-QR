@@ -1,0 +1,383 @@
+From 3c89b65b6b310d2d194b21a84f376d896477db60 Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sat, 22 Aug 2026 15:03:40 +0000
+Subject: [PATCH] =?UTF-8?q?Corrige=20gr=C3=A1fico=20perdido=20en=20el=20Ex?=
+ =?UTF-8?q?cel=20y=20agrega=20m=C3=B3dulo=20de=20fotos=20reordenable?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- generarExcelParteDiario.ts: ExcelJS descarta el gráfico 'Programado vs
+  Real' de la plantilla al guardar (no soporta gráficos). Se restaura
+  reinyectando xl/charts/chart1.xml y xl/drawings/drawing1.xml originales
+  en el zip final via JSZip. Verificado: build limpio, prueba en
+  Chromium real, recalculo con LibreOffice (123 formulas, 0 errores) y
+  el grafico se ve correctamente en el PDF de salida.
+- GestorFotos.tsx (nuevo): modulo separado para cargar/organizar fotos.
+  Tarjetas con esquinas redondeadas, grilla simetrica de tamano fijo,
+  reordenar arrastrando (snap por cercania, funciona con mouse y con
+  tactil) o con flechas de respaldo. El orden queda reflejado 1:1 en la
+  hoja Imagenes del Excel.
+- ParteDiarioForm.tsx: usa GestorFotos en vez del bloque de fotos
+  anterior.
+- Dependencia jszip.
+---
+ package-lock.json                             |   1 +
+ package.json                                  |   1 +
+ src/components/ParteDiario/GestorFotos.tsx    | 170 ++++++++++++++++++
+ .../ParteDiario/ParteDiarioForm.tsx           |  41 +----
+ src/lib/generarExcelParteDiario.ts            |  49 ++++-
+ 5 files changed, 219 insertions(+), 43 deletions(-)
+ create mode 100644 src/components/ParteDiario/GestorFotos.tsx
+
+diff --git a/package-lock.json b/package-lock.json
+index 48484da..598e300 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -15,6 +15,7 @@
+         "date-fns": "^2.30.0",
+         "exceljs": "^4.4.0",
+         "jspdf": "^2.5.1",
++        "jszip": "^3.10.1",
+         "pdf-lib": "^1.17.1",
+         "pdfjs-dist": "^4.0.0",
+         "qrcode": "^1.5.3",
+diff --git a/package.json b/package.json
+index 57ea78d..31089f8 100644
+--- a/package.json
++++ b/package.json
+@@ -18,6 +18,7 @@
+     "date-fns": "^2.30.0",
+     "exceljs": "^4.4.0",
+     "jspdf": "^2.5.1",
++    "jszip": "^3.10.1",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^4.0.0",
+     "qrcode": "^1.5.3",
+diff --git a/src/components/ParteDiario/GestorFotos.tsx b/src/components/ParteDiario/GestorFotos.tsx
+new file mode 100644
+index 0000000..ca15728
+--- /dev/null
++++ b/src/components/ParteDiario/GestorFotos.tsx
+@@ -0,0 +1,170 @@
++import { useRef, useState } from 'react'
++
++export interface FotoPendiente {
++  file: File
++  caption: string
++  preview: string
++}
++
++interface GestorFotosProps {
++  fotos: FotoPendiente[]
++  onChange: (fotos: FotoPendiente[]) => void
++}
++
++// Módulo de carga y organización de fotos del Parte Diario, separado del
++// resto del formulario. Arrastra una tarjeta sobre otra para reordenarlas
++// (funciona con mouse y con el dedo en tablet/celular) o usa las flechas
++// ‹ › si prefieres no arrastrar. El orden que quede acá es el mismo con el
++// que las fotos se insertan en la hoja "Imágenes" del Excel al generarlo
++// (ver generarExcelParteDiario.ts, que recorre parte.fotos en orden).
++export const GestorFotos = ({ fotos, onChange }: GestorFotosProps) => {
++  const gridRef = useRef<HTMLDivElement>(null)
++  const [dragIndex, setDragIndex] = useState<number | null>(null)
++  const [overIndex, setOverIndex] = useState<number | null>(null)
++
++  const agregarFotos = (files: FileList | null) => {
++    if (!files || files.length === 0) return
++    const nuevas: FotoPendiente[] = Array.from(files).map((file) => ({
++      file,
++      caption: '',
++      preview: URL.createObjectURL(file),
++    }))
++    onChange([...fotos, ...nuevas])
++  }
++
++  const actualizarCaption = (index: number, caption: string) => {
++    onChange(fotos.map((f, i) => (i === index ? { ...f, caption } : f)))
++  }
++
++  const quitar = (index: number) => onChange(fotos.filter((_, i) => i !== index))
++
++  const mover = (index: number, destino: number) => {
++    if (destino < 0 || destino >= fotos.length || destino === index) return
++    const next = [...fotos]
++    const [item] = next.splice(index, 1)
++    next.splice(destino, 0, item)
++    onChange(next)
++  }
++
++  const finalizarArrastre = () => {
++    if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex) {
++      mover(dragIndex, overIndex)
++    }
++    setDragIndex(null)
++    setOverIndex(null)
++  }
++
++  // Snap por cercanía: mientras arrastras, la tarjeta que "gana" es la que
++  // tiene el centro más cercano al dedo/cursor — no hace falta soltar
++  // exactamente encima, el resto de la grilla (simétrica, tamaño fijo por
++  // celda) se reacomoda sola alrededor de esa posición.
++  const handlePointerMove = (e: React.PointerEvent) => {
++    if (dragIndex === null || !gridRef.current) return
++    const tarjetas = gridRef.current.querySelectorAll<HTMLElement>('[data-foto-index]')
++    let masCercano: number | null = null
++    let distanciaMin = Infinity
++    tarjetas.forEach((el) => {
++      const rect = el.getBoundingClientRect()
++      const cx = rect.left + rect.width / 2
++      const cy = rect.top + rect.height / 2
++      const distancia = Math.hypot(e.clientX - cx, e.clientY - cy)
++      if (distancia < distanciaMin) {
++        distanciaMin = distancia
++        masCercano = Number(el.dataset.fotoIndex)
++      }
++    })
++    if (masCercano !== null) setOverIndex(masCercano)
++  }
++
++  return (
++    <div>
++      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-2xl px-4 py-6 text-sm text-slate-500 hover:border-blue-400 hover:text-blue-600 cursor-pointer transition-colors">
++        <span>📷 Toca para agregar fotos, o arrastra varias aquí</span>
++        <input type="file" accept="image/*" multiple onChange={(e) => agregarFotos(e.target.files)} className="hidden" />
++      </label>
++
++      {fotos.length > 0 && (
++        <>
++          <p className="text-xs text-slate-400 mt-3 mb-2">
++            {fotos.length} foto{fotos.length === 1 ? '' : 's'} — arrastra una tarjeta sobre otra para reordenar. Este es el orden con el que quedarán en el Excel.
++          </p>
++
++          <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
++            {fotos.map((foto, index) => {
++              const arrastrandoEsta = dragIndex === index
++              const objetivoArrastre = overIndex === index && dragIndex !== null && dragIndex !== index
++              return (
++                <div
++                  key={foto.preview}
++                  data-foto-index={index}
++                  className={`group relative rounded-2xl border bg-white overflow-hidden shadow-sm transition-all duration-150
++                    ${arrastrandoEsta ? 'opacity-40 scale-95 border-slate-200' : 'border-slate-200'}
++                    ${objetivoArrastre ? 'ring-2 ring-blue-500 ring-offset-2 border-blue-300' : ''}
++                  `}
++                >
++                  <span className="absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] font-semibold flex items-center justify-center">
++                    {index + 1}
++                  </span>
++                  <button
++                    type="button"
++                    onClick={() => quitar(index)}
++                    className="absolute top-1.5 right-1.5 z-10 w-5 h-5 rounded-full bg-black/60 text-white text-xs leading-none flex items-center justify-center hover:bg-red-600"
++                    aria-label="Quitar foto"
++                  >
++                    ×
++                  </button>
++
++                  <div
++                    className="aspect-square touch-none cursor-grab active:cursor-grabbing"
++                    onPointerDown={(e) => {
++                      e.currentTarget.setPointerCapture(e.pointerId)
++                      setDragIndex(index)
++                    }}
++                    onPointerMove={handlePointerMove}
++                    onPointerUp={finalizarArrastre}
++                    onPointerCancel={() => {
++                      setDragIndex(null)
++                      setOverIndex(null)
++                    }}
++                  >
++                    <img src={foto.preview} alt="" draggable={false} className="w-full h-full object-cover pointer-events-none" />
++                  </div>
++
++                  <div className="p-2 space-y-1.5">
++                    <input
++                      type="text"
++                      placeholder="Pie de foto"
++                      value={foto.caption}
++                      onChange={(e) => actualizarCaption(index, e.target.value)}
++                      className="w-full text-xs px-2 py-1 border border-slate-200 rounded-lg"
++                    />
++                    <div className="flex items-center justify-between">
++                      <button
++                        type="button"
++                        onClick={() => mover(index, index - 1)}
++                        disabled={index === 0}
++                        className="text-xs text-slate-400 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-slate-400 px-1"
++                        aria-label="Mover antes"
++                      >
++                        ‹
++                      </button>
++                      <button
++                        type="button"
++                        onClick={() => mover(index, index + 1)}
++                        disabled={index === fotos.length - 1}
++                        className="text-xs text-slate-400 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-slate-400 px-1"
++                        aria-label="Mover después"
++                      >
++                        ›
++                      </button>
++                    </div>
++                  </div>
++                </div>
++              )
++            })}
++          </div>
++        </>
++      )}
++    </div>
++  )
++}
+diff --git a/src/components/ParteDiario/ParteDiarioForm.tsx b/src/components/ParteDiario/ParteDiarioForm.tsx
+index 41bc629..b528689 100644
+--- a/src/components/ParteDiario/ParteDiarioForm.tsx
++++ b/src/components/ParteDiario/ParteDiarioForm.tsx
+@@ -8,6 +8,7 @@ import {
+   ParteDiarioEstado,
+   Usuario,
+ } from '@/types/index'
++import { FotoPendiente, GestorFotos } from './GestorFotos'
+ 
+ interface ParteDiarioFormProps {
+   usuario: Usuario
+@@ -41,12 +42,6 @@ interface FilaMaquinaria {
+   horas: number[]
+ }
+ 
+-interface FotoPendiente {
+-  file: File
+-  caption: string
+-  preview: string
+-}
+-
+ const sumar = (valores: number[]) => valores.reduce((acc, v) => acc + (v || 0), 0)
+ 
+ // Formulario completo de Parte Diario — ver MAPEO_CAMPOS.md para el detalle
+@@ -161,17 +156,6 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+     )
+   }
+ 
+-  // ---------- Fotos ----------
+-  const agregarFotos = (files: FileList | null) => {
+-    if (!files) return
+-    const nuevas = Array.from(files).map((file) => ({ file, caption: '', preview: URL.createObjectURL(file) }))
+-    setFotos((prev) => [...prev, ...nuevas])
+-  }
+-  const actualizarCaptionFoto = (index: number, caption: string) => {
+-    setFotos((prev) => prev.map((f, i) => (i === index ? { ...f, caption } : f)))
+-  }
+-  const quitarFoto = (index: number) => setFotos((prev) => prev.filter((_, i) => i !== index))
+-
+   // ---------- Totales calculados (mismas fórmulas que el Excel) ----------
+   const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(f.horas.slice(0, numActividades))))
+   const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => 11 * f.operativos))
+@@ -584,28 +568,7 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+       {/* Fotos */}
+       <section>
+         <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">Fotos del día</h3>
+-        <input type="file" accept="image/*" multiple onChange={(e) => agregarFotos(e.target.files)} className="text-sm" />
+-        {fotos.length > 0 && (
+-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+-            {fotos.map((foto, index) => (
+-              <div key={index} className="border border-slate-200 rounded-lg overflow-hidden">
+-                <img src={foto.preview} alt="" className="w-full h-24 object-cover" />
+-                <div className="p-2 space-y-1">
+-                  <input
+-                    type="text"
+-                    placeholder="Pie de foto"
+-                    value={foto.caption}
+-                    onChange={(e) => actualizarCaptionFoto(index, e.target.value)}
+-                    className="w-full text-xs px-1.5 py-1 border border-slate-200 rounded"
+-                  />
+-                  <button type="button" onClick={() => quitarFoto(index)} className="text-xs text-red-600 hover:underline">
+-                    Quitar
+-                  </button>
+-                </div>
+-              </div>
+-            ))}
+-          </div>
+-        )}
++        <GestorFotos fotos={fotos} onChange={setFotos} />
+       </section>
+ 
+       {/* Comentario del contratista */}
+diff --git a/src/lib/generarExcelParteDiario.ts b/src/lib/generarExcelParteDiario.ts
+index 08ce14f..9a019f5 100644
+--- a/src/lib/generarExcelParteDiario.ts
++++ b/src/lib/generarExcelParteDiario.ts
+@@ -1,4 +1,5 @@
+ import ExcelJS from 'exceljs'
++import JSZip from 'jszip'
+ import { ParteDiario } from '@/types/index'
+ 
+ // Genera el Daily Report en Excel EXACTAMENTE con el formato original: se
+@@ -8,9 +9,51 @@ import { ParteDiario } from '@/types/index'
+ // combinadas, bordes, fórmulas). Mismo principio que el prototipo en
+ // Python/openpyxl ya validado — ver MAPEO_CAMPOS.md para el detalle
+ // celda por celda de cada sección.
++//
++// ExcelJS NO sabe leer/escribir gráficos: al hacer xlsx.load() + writeBuffer()
++// descarta silenciosamente el gráfico "Programado vs. Real" que trae la
++// plantilla (xl/charts/chart1.xml, anclado en xl/drawings/drawing1.xml de la
++// hoja "DR"), aunque no lo hayamos tocado. Por eso, después de que ExcelJS
++// genera el archivo, lo reabrimos como zip (JSZip) y le devolvemos esas
++// piezas tal cual estaban en la plantilla original — ver
++// restaurarGraficoOriginal() más abajo. El gráfico referencia celdas por
++// rango (DR!$L$63, $I$64:$I$65, etc.), así que toma los valores nuevos que
++// ya escribimos solo con que esas celdas conserven su misma posición, que es
++// el caso.
+ 
+ const PLANTILLA_URL = '/plantillas/DR000_12501191.xlsx'
+ 
++// Piezas del paquete .xlsx (formato ZIP/OOXML) que ExcelJS pierde al
++// reserializar y que hay que restaurar desde la plantilla original.
++const PARTES_GRAFICO = [
++  'xl/charts/chart1.xml',
++  'xl/drawings/drawing1.xml',
++  'xl/drawings/_rels/drawing1.xml.rels',
++]
++
++async function restaurarGraficoOriginal(bufferGenerado: ArrayBuffer, bufferPlantilla: ArrayBuffer): Promise<Blob> {
++  const [zipGenerado, zipPlantilla] = await Promise.all([JSZip.loadAsync(bufferGenerado), JSZip.loadAsync(bufferPlantilla)])
++
++  for (const parte of PARTES_GRAFICO) {
++    const original = zipPlantilla.file(parte)
++    if (original) zipGenerado.file(parte, await original.async('uint8array'))
++  }
++
++  // El Content_Types.xml que arma ExcelJS ya no declara chart1.xml (lo quitó
++  // junto con el resto) — sin esa declaración Excel no reconoce la pieza como
++  // un gráfico y la ignora o pide "reparar". Se la agregamos de vuelta si
++  // falta.
++  const contentTypesPath = '[Content_Types].xml'
++  const contentTypes = await zipGenerado.file(contentTypesPath)?.async('string')
++  if (contentTypes && !contentTypes.includes('charts/chart1.xml')) {
++    const override = '<Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>'
++    zipGenerado.file(contentTypesPath, contentTypes.replace('</Types>', `${override}</Types>`))
++  }
++
++  const bufferFinal = await zipGenerado.generateAsync({ type: 'blob' })
++  return bufferFinal
++}
++
+ // Filas fijas en la hoja "DR", en el mismo orden que CARGOS_DIRECTOS /
+ // CARGOS_INDIRECTOS / EQUIPOS_MAQUINARIA (src/types/index.ts) — si esas
+ // listas cambian de orden, hay que actualizar esto también.
+@@ -144,10 +187,8 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+     }
+   }
+ 
+-  const bufferFinal = await workbook.xlsx.writeBuffer()
+-  return new Blob([bufferFinal], {
+-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+-  })
++  const bufferGenerado = await workbook.xlsx.writeBuffer()
++  return restaurarGraficoOriginal(bufferGenerado, buffer)
+ }
+ 
+ export function nombreArchivoParteDiario(parte: ParteDiario): string {
+-- 
+2.43.0
+

@@ -84,16 +84,22 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
             />
           )}
 
-          {/* Parte Diario: módulo independiente de Documentos QR — mismo
-              login, mismo layout, datos separados (ver ARQUITECTURA.md).
-              El rol "mandante" solo ve este módulo. */}
-          <NavItem
-            icon="📝"
-            label="Parte Diario"
-            active={activeView === 'parte-diario'}
-            onClick={() => onViewChange('parte-diario')}
-            expanded={navExpanded}
-          />
+          {/* Daily Report (ex "Parte Diario"): módulo independiente de
+              Documentos QR — mismo login, mismo layout, datos separados
+              (ver ARQUITECTURA.md). Visible para coordinador, apr,
+              consultor y mandante (el rol "mandante" solo ve este
+              módulo). El rol "supervisor" queda excluido a propósito —
+              ver remove_supervisor_daily_report.sql, que revoca el mismo
+              acceso también a nivel de RLS, no solo en este menú. */}
+          {usuario?.rol !== UserRole.SUPERVISOR && (
+            <NavItem
+              icon="📝"
+              label="Daily Report"
+              active={activeView === 'parte-diario'}
+              onClick={() => onViewChange('parte-diario')}
+              expanded={navExpanded}
+            />
+          )}
 
           <NavItem
             icon="⚙️"

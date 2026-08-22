@@ -1,0 +1,159 @@
+From 3aab5b44c72a761e8c3e09fb31e5b9021d7496eb Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sat, 22 Aug 2026 21:31:51 +0000
+Subject: [PATCH] Renombra 'Parte Diario' a 'Daily Report' en toda la interfaz
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Cambia el texto visible al usuario (título del listado, título del
+detalle, botón 'Nuevo', mensajes de error) y los comentarios del código.
+No se tocan nombres internos (componentes ParteDiario*, tabla
+partes_diarios, ruta 'parte-diario') para no arriesgar una migracion de
+datos/rutas innecesaria — solo cambia lo que el usuario ve.
+---
+ src/components/Layout/Layout.tsx                  | 11 +++++++----
+ src/components/ParteDiario/GestorFotos.tsx        |  2 +-
+ src/components/ParteDiario/ParteDiarioDetalle.tsx |  4 ++--
+ src/components/ParteDiario/ParteDiarioForm.tsx    |  6 +++---
+ src/components/ParteDiario/ParteDiarioList.tsx    |  4 ++--
+ src/types/index.ts                                |  4 ++--
+ 6 files changed, 17 insertions(+), 14 deletions(-)
+
+diff --git a/src/components/Layout/Layout.tsx b/src/components/Layout/Layout.tsx
+index 4dcfb44..03023dc 100644
+--- a/src/components/Layout/Layout.tsx
++++ b/src/components/Layout/Layout.tsx
+@@ -84,12 +84,15 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
+             />
+           )}
+ 
+-          {/* Parte Diario: módulo independiente de Documentos QR — mismo
+-              login, mismo layout, datos separados (ver ARQUITECTURA.md).
+-              El rol "mandante" solo ve este módulo. */}
++          {/* Daily Report (ex "Parte Diario"): módulo independiente de
++              Documentos QR — mismo login, mismo layout, datos separados
++              (ver ARQUITECTURA.md). Visible para TODOS los roles
++              autenticados a propósito, sin gating por rol: el rol
++              "mandante" solo ve este módulo, y coordinador/supervisor/apr/
++              consultor lo ven además de Documentos QR. */}
+           <NavItem
+             icon="📝"
+-            label="Parte Diario"
++            label="Daily Report"
+             active={activeView === 'parte-diario'}
+             onClick={() => onViewChange('parte-diario')}
+             expanded={navExpanded}
+diff --git a/src/components/ParteDiario/GestorFotos.tsx b/src/components/ParteDiario/GestorFotos.tsx
+index ca15728..4efa62e 100644
+--- a/src/components/ParteDiario/GestorFotos.tsx
++++ b/src/components/ParteDiario/GestorFotos.tsx
+@@ -11,7 +11,7 @@ interface GestorFotosProps {
+   onChange: (fotos: FotoPendiente[]) => void
+ }
+ 
+-// Módulo de carga y organización de fotos del Parte Diario, separado del
++// Módulo de carga y organización de fotos del Daily Report, separado del
+ // resto del formulario. Arrastra una tarjeta sobre otra para reordenarlas
+ // (funciona con mouse y con el dedo en tablet/celular) o usa las flechas
+ // ‹ › si prefieres no arrastrar. El orden que quede acá es el mismo con el
+diff --git a/src/components/ParteDiario/ParteDiarioDetalle.tsx b/src/components/ParteDiario/ParteDiarioDetalle.tsx
+index c7b57ea..affa782 100644
+--- a/src/components/ParteDiario/ParteDiarioDetalle.tsx
++++ b/src/components/ParteDiario/ParteDiarioDetalle.tsx
+@@ -30,7 +30,7 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
+       const data = await db.obtenerParteDiario(parteId)
+       setParte(data as ParteDiario)
+     } catch (err) {
+-      setError(err instanceof Error ? err.message : 'No se pudo cargar el parte diario')
++      setError(err instanceof Error ? err.message : 'No se pudo cargar el Daily Report')
+     } finally {
+       setIsLoading(false)
+     }
+@@ -93,7 +93,7 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
+         <div className="flex items-center justify-between">
+           <div>
+             <h2 className="text-xl font-bold text-slate-900">
+-              Parte Diario N° {String(parte.numero_reporte).padStart(3, '0')}
++              Daily Report N° {String(parte.numero_reporte).padStart(3, '0')}
+             </h2>
+             <p className="text-sm text-slate-500">{parte.fecha} · {parte.condicion_climatica ?? 'Sin condición registrada'}</p>
+           </div>
+diff --git a/src/components/ParteDiario/ParteDiarioForm.tsx b/src/components/ParteDiario/ParteDiarioForm.tsx
+index b528689..973ace0 100644
+--- a/src/components/ParteDiario/ParteDiarioForm.tsx
++++ b/src/components/ParteDiario/ParteDiarioForm.tsx
+@@ -44,7 +44,7 @@ interface FilaMaquinaria {
+ 
+ const sumar = (valores: number[]) => valores.reduce((acc, v) => acc + (v || 0), 0)
+ 
+-// Formulario completo de Parte Diario — ver MAPEO_CAMPOS.md para el detalle
++// Formulario completo de Daily Report — ver MAPEO_CAMPOS.md para el detalle
+ // celda por celda del Excel que cada sección alimenta. Los cálculos
+ // (Permiso-Descanso, HH/HM Total x Act., Operativos, totales, acumulados)
+ // se hacen acá igual que las fórmulas del Excel original, para que el
+@@ -235,7 +235,7 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+ 
+       onGuardado()
+     } catch (err) {
+-      setError(err instanceof Error ? err.message : 'No se pudo guardar el parte diario')
++      setError(err instanceof Error ? err.message : 'No se pudo guardar el Daily Report')
+     } finally {
+       setIsSaving(null)
+     }
+@@ -249,7 +249,7 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+     <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-8">
+       <div className="flex items-center justify-between">
+         <div>
+-          <h2 className="text-xl font-bold text-slate-900">Nuevo Parte Diario</h2>
++          <h2 className="text-xl font-bold text-slate-900">Nuevo Daily Report</h2>
+           <p className="text-sm text-slate-500">
+             {contrato?.codigo} · {contrato?.nombre}
+           </p>
+diff --git a/src/components/ParteDiario/ParteDiarioList.tsx b/src/components/ParteDiario/ParteDiarioList.tsx
+index 81b3a64..699a80c 100644
+--- a/src/components/ParteDiario/ParteDiarioList.tsx
++++ b/src/components/ParteDiario/ParteDiarioList.tsx
+@@ -89,7 +89,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+     <div className="space-y-4">
+       <div className="flex items-center justify-between">
+         <div>
+-          <h2 className="text-xl font-bold text-slate-900">Parte Diario</h2>
++          <h2 className="text-xl font-bold text-slate-900">Daily Report</h2>
+           <p className="text-sm text-slate-500">
+             {contrato?.codigo} · {contrato?.nombre}
+           </p>
+@@ -99,7 +99,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+             onClick={() => setMostrarFormulario(true)}
+             className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+           >
+-            + Nuevo parte diario
++            + Nuevo Daily Report
+           </button>
+         )}
+       </div>
+diff --git a/src/types/index.ts b/src/types/index.ts
+index 52501cf..61e2dc8 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -6,7 +6,7 @@ export enum UserRole {
+   SUPERVISOR = 'supervisor',
+   CONSULTOR = 'consultor',
+   // Persona de la empresa mandante (ver contratos.mandante) que comenta/
+-  // aprueba el Parte Diario después de enviado. No ve Documentos QR.
++  // aprueba el Daily Report después de enviado. No ve Documentos QR.
+   MANDANTE = 'mandante',
+ }
+ 
+@@ -261,7 +261,7 @@ export interface ParteDiario {
+ }
+ 
+ // Listas fijas de cargos/equipos del contrato 12501191 (ver MAPEO_CAMPOS.md).
+-// Si el día de mañana hay más de un contrato con Parte Diario y su propia
++// Si el día de mañana hay más de un contrato con Daily Report y su propia
+ // lista de cargos, esto pasa a vivir en la tabla `contratos` (columna
+ // jsonb) en vez de quedar hardcodeado acá.
+ export const CARGOS_DIRECTOS = [
+-- 
+2.43.0
+

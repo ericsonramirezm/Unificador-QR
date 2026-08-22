@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { db } from '@lib/supabase'
 import { ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
+import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
 
 interface ParteDiarioDetalleProps {
   usuario: Usuario
@@ -20,6 +21,8 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
   const [comentario, setComentario] = useState('')
   const [isComentando, setIsComentando] = useState(false)
 
+  const [isGenerandoExcel, setIsGenerandoExcel] = useState(false)
+
   const cargar = async () => {
     setIsLoading(true)
     setError(null)
@@ -27,7 +30,7 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
       const data = await db.obtenerParteDiario(parteId)
       setParte(data as ParteDiario)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cargar el parte diario')
+      setError(err instanceof Error ? err.message : 'No se pudo cargar el Daily Report')
     } finally {
       setIsLoading(false)
     }
@@ -50,6 +53,20 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
       setError(err instanceof Error ? err.message : 'No se pudo guardar el comentario')
     } finally {
       setIsComentando(false)
+    }
+  }
+
+  const descargarExcel = async () => {
+    if (!parte) return
+    setIsGenerandoExcel(true)
+    setError(null)
+    try {
+      const blob = await generarExcelParteDiario(parte)
+      descargarBlob(blob, nombreArchivoParteDiario(parte))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo generar el Excel')
+    } finally {
+      setIsGenerandoExcel(false)
     }
   }
 
@@ -76,11 +93,20 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              Parte Diario N° {String(parte.numero_reporte).padStart(3, '0')}
+              Daily Report N° {String(parte.numero_reporte).padStart(3, '0')}
             </h2>
             <p className="text-sm text-slate-500">{parte.fecha} · {parte.condicion_climatica ?? 'Sin condición registrada'}</p>
           </div>
-          <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{parte.estado}</span>
+          <div className="flex items-center gap-3">
+            <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{parte.estado}</span>
+            <button
+              onClick={descargarExcel}
+              disabled={isGenerandoExcel}
+              className="px-3 py-1.5 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {isGenerandoExcel ? 'Generando…' : '⬇ Descargar Excel'}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">

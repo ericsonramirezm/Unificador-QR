@@ -92,7 +92,7 @@ export function App() {
         <GestionUsuarios usuario={usuario} />
       )}
 
-      {activeView === 'parte-diario' && (
+      {activeView === 'parte-diario' && usuario.rol !== UserRole.SUPERVISOR && (
         <ParteDiarioList usuario={usuario} contrato={contratoActivo} />
       )}
 

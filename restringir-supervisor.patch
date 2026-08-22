@@ -1,0 +1,137 @@
+From 5a47783f951456fe875367194bf3b66ed91fad5e Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sat, 22 Aug 2026 21:47:50 +0000
+Subject: [PATCH] Restringe el acceso al modulo Daily Report: el rol supervisor
+ queda fuera
+
+- Layout.tsx: el item de menu 'Daily Report' ya no se muestra si
+  usuario.rol === SUPERVISOR.
+- App.tsx: guarda extra para no renderizar la vista aunque activeView
+  quedara en 'parte-diario' (defensa en profundidad).
+- ParteDiarioList.tsx: puedeCrear() ya no incluye supervisor.
+- remove_supervisor_daily_report.sql (nuevo, aplicar en Supabase): quita
+  el permiso a nivel de RLS tambien, no solo en la interfaz -- si no,
+  un supervisor podria seguir creando/editando partes_diarios llamando
+  a la API directamente.
+---
+ remove_supervisor_daily_report.sql            | 40 +++++++++++++++++++
+ src/App.tsx                                   |  2 +-
+ src/components/Layout/Layout.tsx              | 25 +++++++-----
+ .../ParteDiario/ParteDiarioList.tsx           |  5 ++-
+ 4 files changed, 58 insertions(+), 14 deletions(-)
+ create mode 100644 remove_supervisor_daily_report.sql
+
+diff --git a/remove_supervisor_daily_report.sql b/remove_supervisor_daily_report.sql
+new file mode 100644
+index 0000000..82c6ea2
+--- /dev/null
++++ b/remove_supervisor_daily_report.sql
+@@ -0,0 +1,40 @@
++-- ============================================================
++-- Revoca el acceso del rol "supervisor" al módulo Daily Report
++-- (ex "Parte Diario"). No basta con ocultar el ítem del menú (ver
++-- Layout.tsx): si no se cambia también la política de RLS, un
++-- supervisor podría seguir creando/editando partes_diarios llamando
++-- a la API de Supabase directamente. Esto dejar solo a "coordinador"
++-- y "apr" con permisos de creación/edición; "mandante" y "consultor"
++-- no se tocan (ver add_partes_diarios.sql para el resto de políticas).
++-- ============================================================
++
++drop policy if exists "supervisor_apr_crear_partes" on public.partes_diarios;
++create policy "apr_crear_partes" on public.partes_diarios
++  for insert with check (
++    public.usuario_rol_actual() = 'apr'
++    and creado_por = auth.uid()
++  );
++
++drop policy if exists "supervisor_apr_ver_editar_propios" on public.partes_diarios;
++create policy "apr_ver_propios" on public.partes_diarios
++  for select using (
++    public.usuario_rol_actual() = 'apr'
++    and creado_por = auth.uid()
++  );
++
++drop policy if exists "supervisor_apr_actualizar_propios" on public.partes_diarios;
++create policy "apr_actualizar_propios" on public.partes_diarios
++  for update using (
++    public.usuario_rol_actual() = 'apr'
++    and creado_por = auth.uid()
++  )
++  with check (
++    public.usuario_rol_actual() = 'apr'
++    and creado_por = auth.uid()
++  );
++
++-- Nota: si algún supervisor ya creó partes_diarios antes de este cambio,
++-- esas filas siguen existiendo (creado_por = ese supervisor), pero él ya
++-- no podrá verlas ni editarlas — solo coordinador tiene acceso total.
++-- Si necesitas que alguien "herede" esos reportes, dime y armamos un
++-- UPDATE puntual de creado_por.
+diff --git a/src/App.tsx b/src/App.tsx
+index 34b2756..7c23ed1 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -92,7 +92,7 @@ export function App() {
+         <GestionUsuarios usuario={usuario} />
+       )}
+ 
+-      {activeView === 'parte-diario' && (
++      {activeView === 'parte-diario' && usuario.rol !== UserRole.SUPERVISOR && (
+         <ParteDiarioList usuario={usuario} contrato={contratoActivo} />
+       )}
+ 
+diff --git a/src/components/Layout/Layout.tsx b/src/components/Layout/Layout.tsx
+index 03023dc..3fb72fa 100644
+--- a/src/components/Layout/Layout.tsx
++++ b/src/components/Layout/Layout.tsx
+@@ -86,17 +86,20 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
+ 
+           {/* Daily Report (ex "Parte Diario"): módulo independiente de
+               Documentos QR — mismo login, mismo layout, datos separados
+-              (ver ARQUITECTURA.md). Visible para TODOS los roles
+-              autenticados a propósito, sin gating por rol: el rol
+-              "mandante" solo ve este módulo, y coordinador/supervisor/apr/
+-              consultor lo ven además de Documentos QR. */}
+-          <NavItem
+-            icon="📝"
+-            label="Daily Report"
+-            active={activeView === 'parte-diario'}
+-            onClick={() => onViewChange('parte-diario')}
+-            expanded={navExpanded}
+-          />
++              (ver ARQUITECTURA.md). Visible para coordinador, apr,
++              consultor y mandante (el rol "mandante" solo ve este
++              módulo). El rol "supervisor" queda excluido a propósito —
++              ver remove_supervisor_daily_report.sql, que revoca el mismo
++              acceso también a nivel de RLS, no solo en este menú. */}
++          {usuario?.rol !== UserRole.SUPERVISOR && (
++            <NavItem
++              icon="📝"
++              label="Daily Report"
++              active={activeView === 'parte-diario'}
++              onClick={() => onViewChange('parte-diario')}
++              expanded={navExpanded}
++            />
++          )}
+ 
+           <NavItem
+             icon="⚙️"
+diff --git a/src/components/ParteDiario/ParteDiarioList.tsx b/src/components/ParteDiario/ParteDiarioList.tsx
+index 699a80c..a1ed7cc 100644
+--- a/src/components/ParteDiario/ParteDiarioList.tsx
++++ b/src/components/ParteDiario/ParteDiarioList.tsx
+@@ -21,8 +21,9 @@ const COLOR_ESTADO: Record<ParteDiarioEstado, string> = {
+   [ParteDiarioEstado.COMENTADO_MANDANTE]: 'bg-emerald-100 text-emerald-700',
+ }
+ 
+-const puedeCrear = (rol: UserRole) =>
+-  rol === UserRole.COORDINADOR || rol === UserRole.SUPERVISOR || rol === UserRole.APR
++// El rol "supervisor" no tiene acceso al módulo Daily Report (ver
++// Layout.tsx y remove_supervisor_daily_report.sql).
++const puedeCrear = (rol: UserRole) => rol === UserRole.COORDINADOR || rol === UserRole.APR
+ 
+ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => {
+   const [partes, setPartes] = useState<ParteDiario[]>([])
+-- 
+2.43.0
+

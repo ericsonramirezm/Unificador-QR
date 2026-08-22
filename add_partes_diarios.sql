@@ -10,9 +10,13 @@
 -- ============================================================
 
 -- ---------- rol nuevo ----------
--- "usuarios.rol" es tipo text (no enum de Postgres), así que no hace
--- falta ALTER TYPE: basta con permitirlo en las políticas de abajo y
--- en el enum de TypeScript (src/types/index.ts).
+-- "usuarios.rol" es tipo text (no enum de Postgres) pero tiene un check
+-- constraint que solo permitía los roles previos — hay que ampliarlo,
+-- además de permitirlo en las políticas de abajo y en el enum de
+-- TypeScript (src/types/index.ts).
+alter table public.usuarios drop constraint if exists usuarios_rol_check;
+alter table public.usuarios add constraint usuarios_rol_check
+  check (rol in ('coordinador', 'apr', 'supervisor', 'consultor', 'mandante'));
 
 -- ---------- tabla principal ----------
 create table if not exists public.partes_diarios (

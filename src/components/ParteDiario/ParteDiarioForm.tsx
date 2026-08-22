@@ -8,6 +8,7 @@ import {
   ParteDiarioEstado,
   Usuario,
 } from '@/types/index'
+import { FotoPendiente, GestorFotos } from './GestorFotos'
 
 interface ParteDiarioFormProps {
   usuario: Usuario
@@ -41,15 +42,9 @@ interface FilaMaquinaria {
   horas: number[]
 }
 
-interface FotoPendiente {
-  file: File
-  caption: string
-  preview: string
-}
-
 const sumar = (valores: number[]) => valores.reduce((acc, v) => acc + (v || 0), 0)
 
-// Formulario completo de Parte Diario — ver MAPEO_CAMPOS.md para el detalle
+// Formulario completo de Daily Report — ver MAPEO_CAMPOS.md para el detalle
 // celda por celda del Excel que cada sección alimenta. Los cálculos
 // (Permiso-Descanso, HH/HM Total x Act., Operativos, totales, acumulados)
 // se hacen acá igual que las fórmulas del Excel original, para que el
@@ -161,17 +156,6 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
     )
   }
 
-  // ---------- Fotos ----------
-  const agregarFotos = (files: FileList | null) => {
-    if (!files) return
-    const nuevas = Array.from(files).map((file) => ({ file, caption: '', preview: URL.createObjectURL(file) }))
-    setFotos((prev) => [...prev, ...nuevas])
-  }
-  const actualizarCaptionFoto = (index: number, caption: string) => {
-    setFotos((prev) => prev.map((f, i) => (i === index ? { ...f, caption } : f)))
-  }
-  const quitarFoto = (index: number) => setFotos((prev) => prev.filter((_, i) => i !== index))
-
   // ---------- Totales calculados (mismas fórmulas que el Excel) ----------
   const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(f.horas.slice(0, numActividades))))
   const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => 11 * f.operativos))
@@ -251,7 +235,7 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
 
       onGuardado()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el parte diario')
+      setError(err instanceof Error ? err.message : 'No se pudo guardar el Daily Report')
     } finally {
       setIsSaving(null)
     }
@@ -265,7 +249,7 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
     <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Nuevo Parte Diario</h2>
+          <h2 className="text-xl font-bold text-slate-900">Nuevo Daily Report</h2>
           <p className="text-sm text-slate-500">
             {contrato?.codigo} · {contrato?.nombre}
           </p>
@@ -584,28 +568,7 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
       {/* Fotos */}
       <section>
         <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">Fotos del día</h3>
-        <input type="file" accept="image/*" multiple onChange={(e) => agregarFotos(e.target.files)} className="text-sm" />
-        {fotos.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
-            {fotos.map((foto, index) => (
-              <div key={index} className="border border-slate-200 rounded-lg overflow-hidden">
-                <img src={foto.preview} alt="" className="w-full h-24 object-cover" />
-                <div className="p-2 space-y-1">
-                  <input
-                    type="text"
-                    placeholder="Pie de foto"
-                    value={foto.caption}
-                    onChange={(e) => actualizarCaptionFoto(index, e.target.value)}
-                    className="w-full text-xs px-1.5 py-1 border border-slate-200 rounded"
-                  />
-                  <button type="button" onClick={() => quitarFoto(index)} className="text-xs text-red-600 hover:underline">
-                    Quitar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        <GestorFotos fotos={fotos} onChange={setFotos} />
       </section>
 
       {/* Comentario del contratista */}

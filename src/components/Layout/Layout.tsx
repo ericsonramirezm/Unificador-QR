@@ -2,7 +2,7 @@ import { Usuario, UserRole } from '@/types/index'
 import { auth } from '@lib/supabase'
 import { useState } from 'react'
 
-type Vista = 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'
+type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'
 
 interface LayoutProps {
   usuario: Usuario | null
@@ -38,6 +38,14 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
 
         {/* Nav items */}
         <nav className="flex-1 space-y-1 px-2 py-4">
+          <NavItem
+            icon="🏠"
+            label="Inicio"
+            active={activeView === 'inicio'}
+            onClick={() => onViewChange('inicio')}
+            expanded={navExpanded}
+          />
+
           {usuario?.rol === UserRole.COORDINADOR && (
             <>
               <NavItem

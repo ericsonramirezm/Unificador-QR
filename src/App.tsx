@@ -5,15 +5,16 @@ import { DocumentList } from '@components/DocumentList/DocumentList'
 import { HistorialAprobados } from '@components/History/HistorialAprobados'
 import { GestionUsuarios } from '@components/Users/GestionUsuarios'
 import { ParteDiarioList } from '@components/ParteDiario/ParteDiarioList'
+import { Inicio } from '@components/Inicio/Inicio'
 import { Usuario, UserRole } from '@/types/index'
 import { auth, db } from '@lib/supabase'
+
+type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'
 
 export function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [activeView, setActiveView] = useState<'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'>(
-    'documentos'
-  )
+  const [activeView, setActiveView] = useState<Vista>('inicio')
   const [contratoActivo, setContratoActivo] = useState<any>(null)
 
   useEffect(() => {
@@ -57,7 +58,7 @@ export function App() {
   const handleLogout = () => {
     setUsuario(null)
     setContratoActivo(null)
-    setActiveView('documentos')
+    setActiveView('inicio')
   }
 
   if (isLoading) {
@@ -82,6 +83,10 @@ export function App() {
       activeView={activeView}
       onViewChange={setActiveView}
     >
+      {activeView === 'inicio' && (
+        <Inicio usuario={usuario} contrato={contratoActivo} onNavigate={setActiveView} />
+      )}
+
       {activeView === 'documentos' && <DocumentList usuario={usuario} contrato={contratoActivo} />}
 
       {activeView === 'historial' && usuario.rol === UserRole.COORDINADOR && (

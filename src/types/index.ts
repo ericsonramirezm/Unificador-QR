@@ -278,7 +278,7 @@ export const CARGOS_DIRECTOS = [
 
 export const CARGOS_INDIRECTOS = [
   'Administrador de Contrato', 'Jefe de Oficina Técnica', 'Ingeniero de Calidad',
-  'Jefe de Terreno', 'Supervisor', 'Asesor SSOMA', 'Administrativo',
+  'Jefe de Terreno', 'Supervisor', 'Asesor Prevencion de Riesgos', 'Administrativo',
   'Logística', 'Conductor', 'Topógrafo', 'Coordinador de Terreno',
 ] as const;
 

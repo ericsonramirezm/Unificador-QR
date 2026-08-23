@@ -51,20 +51,42 @@ const N_ANCLAS_PLANTILLA_IMAGENES = 2
 // presente.
 const RADIO_ESQUINA_FOTO = 3000 // 3% del lado más corto
 
-// numFotos acota el redondeo a las anclas que de verdad son fotos: las
+// Fotos de distinto tamaño/proporción en la misma fila de la grilla (ej.
+// una foto horizontal 4:3 junto a una vertical) se veían con distinta
+// ALTURA en Excel real, aunque el recuadro (xdr:from/xdr:to) de las tres
+// fuera idéntico — se verificó con fotos de prueba de proporciones muy
+// distintas que el XML generado tenía las mismas coordenadas de recuadro
+// para las tres, así que no era un bug de calcularCeldaFoto().
+//
+// La causa: ExcelJS agrega SIEMPRE <a:picLocks noChangeAspect="1"/> en
+// cada foto (no hay forma de pedirle lo contrario por API). Ese atributo
+// le dice a Excel "no permitas una escala no-uniforme de esta imagen", y
+// Excel real (a diferencia de LibreOffice, que ignoraba esto y siempre
+// hacía caso al <a:stretch><a:fillRect/></a:stretch> del blipFill) lo
+// respeta incluso en el recuadro inicial: en vez de estirar la foto para
+// llenar el recuadro fijo de la grilla, la muestra con SU proporción
+// original — de ahí que cada foto saliera de una altura distinta según su
+// propia relación ancho/alto, no según el recuadro. Por eso acá se lo
+// sacamos (solo a las fotos, no a las firmas, donde sí queremos mantener
+// la proporción original — ver CajaFirma más abajo).
+//
+// numFotos acota ambos ajustes a las anclas que de verdad son fotos: las
 // primeras N_ANCLAS_PLANTILLA_IMAGENES son los logos (no se tocan) y todo
 // lo que venga después de "logos + fotos" son las firmas digitales que se
-// agregan más abajo (tampoco se tocan — sus esquinas deben quedar rectas).
-function redondearEsquinasFotos(xmlDrawing: string, numFotos: number): string {
+// agregan más abajo (tampoco se tocan — deben quedar con esquinas rectas
+// y proporción fija).
+function corregirAnclasFotos(xmlDrawing: string, numFotos: number): string {
   let contador = 0
   return xmlDrawing.replace(/<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g, (bloque) => {
     contador += 1
     const esFoto = contador > N_ANCLAS_PLANTILLA_IMAGENES && contador <= N_ANCLAS_PLANTILLA_IMAGENES + numFotos
     if (!esFoto) return bloque
-    return bloque.replace(
-      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
-      `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${RADIO_ESQUINA_FOTO}"/></a:avLst></a:prstGeom>`
-    )
+    return bloque
+      .replace(
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
+        `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${RADIO_ESQUINA_FOTO}"/></a:avLst></a:prstGeom>`
+      )
+      .replace('<a:picLocks noChangeAspect="1"/>', '<a:picLocks noChangeAspect="0"/>')
   })
 }
 
@@ -99,14 +121,16 @@ const FIRMA_COORDINADOR_MEDIA = 'firma-coordinador.png'
 
 // Celda con el nombre del Coordinador de Terreno en la hoja "DR" — la
 // hoja "Imágenes" no necesita que la toquemos: su celda equivalente
-// (C90) ya es la fórmula "=+DR!C94" en la plantilla, así que sigue a
-// esta automáticamente al recalcular.
-const CELDA_NOMBRE_COORDINADOR = 'C94'
+// (C90) ya es la fórmula "=+DR!C95" en la plantilla, así que sigue a
+// esta automáticamente al recalcular. (Antes era C94: se corrió una fila
+// hacia abajo cuando se agregó la fila "Total ... Acumuladas Actual" —
+// ver plantilla DR000_12501191.xlsx.)
+const CELDA_NOMBRE_COORDINADOR = 'C95'
 
 // Fila (índice 0 de OOXML, o sea fila de Excel menos 1) de la etiqueta
 // "Firma" en cada hoja.
-const FILA_FIRMA_DR = 94 // fila 95 en Excel
-const FILA_FIRMA_IMAGENES = 90 // fila 91 en Excel
+const FILA_FIRMA_DR = 95 // fila 96 en Excel (antes fila 95, corrida +1 igual que CELDA_NOMBRE_COORDINADOR)
+const FILA_FIRMA_IMAGENES = 90 // fila 91 en Excel (la hoja "Imágenes" no tiene la fila nueva, no se corre)
 
 // Recuadro de cada firma dentro de UNA sola columna (para no invadir la
 // celda de al lado ni la de "Firma"/"Nombre" de al lado), en EMU (914400
@@ -210,10 +234,10 @@ async function posprocesarExcel(
     zipGenerado.file(contentTypesPath, contentTypes.replace('</Types>', `${override}</Types>`))
   }
 
-  // ---- 2. Esquinas redondeadas en las fotos (hoja Imágenes) ----
+  // ---- 2. Esquinas redondeadas + tamaño de recuadro fijo en las fotos (hoja Imágenes) ----
   const drawing2Path = 'xl/drawings/drawing2.xml'
   const drawing2 = await zipGenerado.file(drawing2Path)?.async('string')
-  if (drawing2) zipGenerado.file(drawing2Path, redondearEsquinasFotos(drawing2, numFotosInsertadas))
+  if (drawing2) zipGenerado.file(drawing2Path, corregirAnclasFotos(drawing2, numFotosInsertadas))
 
   // ---- 3. Firmas digitales (hojas DR e Imágenes) ----
   const firmasParaCaja = (cajaCoordinador: CajaFirma, cajaSara: CajaFirma): FirmaAInsertar[] => {
@@ -250,6 +274,22 @@ async function posprocesarExcel(
     zipGenerado.file(drawing2Path, drawing)
     zipGenerado.file(drawing2RelsPath, rels)
     for (const m of media) zipGenerado.file(`xl/media/${m.nombre}`, new Uint8Array(m.buffer))
+  }
+
+  // ---- 4. Forzar recálculo al abrir ----
+  // ExcelJS escribe valores nuevos en celdas (ej. las horas por actividad
+  // de Fuerza Laboral Directa/Indirecta) pero no actualiza xl/calcChain.xml
+  // ni recalcula los <v> ya cacheados de las fórmulas que dependen de esas
+  // celdas (ej. "Total ... Turno" en la fila 79, o "Total ... Acumuladas
+  // Actual" en la fila 81) — sin este flag, un lector que confíe en el
+  // valor cacheado en vez de recalcular mostraría esas filas en 0 hasta
+  // que alguien fuerce un recálculo manual. fullCalcOnLoad="1" le pide a
+  // cualquier lector (Excel, LibreOffice, Google Sheets) que recalcule
+  // todo antes de mostrar el archivo.
+  const workbookPath = 'xl/workbook.xml'
+  const workbookXml = await zipGenerado.file(workbookPath)?.async('string')
+  if (workbookXml && !workbookXml.includes('fullCalcOnLoad')) {
+    zipGenerado.file(workbookPath, workbookXml.replace('<calcPr ', '<calcPr fullCalcOnLoad="1" '))
   }
 
   return zipGenerado.generateAsync({ type: 'blob' })
@@ -391,19 +431,36 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   hojaDR.getCell('L64').value = parte.hh_directas_programado
   hojaDR.getCell('L65').value = parte.hh_indirectas_programado
 
-  // ---------- Acumulados de turno ----------
-  // Ya vienen calculados (acumulado anterior + turno actual) desde el
-  // formulario — se escriben como número, no como fórmula (ver decisión
-  // en MAPEO_CAMPOS.md: acumulados automáticos).
-  if (parte.hh_directas_acumuladas != null) hojaDR.getCell('D80').value = parte.hh_directas_acumuladas
-  if (parte.hm_acumuladas != null) hojaDR.getCell('I80').value = parte.hm_acumuladas
-  if (parte.hh_indirectas_acumuladas != null) hojaDR.getCell('N80').value = parte.hh_indirectas_acumuladas
+  // ---------- Acumulados de turno: Anterior (fila 80) + Actual (fila 81) ----------
+  // parte.hh_directas_acumuladas/hm_acumuladas/hh_indirectas_acumuladas ya
+  // vienen desde el formulario como el TOTAL combinado (acumulado anterior
+  // + turno de hoy — ver ParteDiarioForm.tsx). La plantilla, en cambio,
+  // ahora separa esto en dos filas: "Anterior" (fila 80, un número fijo
+  // que escribimos acá) y "Actual" (fila 81, fórmula de la propia
+  // plantilla = Total Turno [fila 79, que se autocalcula de las celdas
+  // que ya llenamos arriba] + Anterior). Por eso acá solo escribimos
+  // "Anterior" = total combinado menos el turno de hoy — "hoy" se
+  // recalcula sumando las mismas celdas que la fila 79 de la plantilla
+  // suma (columnas Act.1..Act.7 de mano de obra directa/maquinaria, y
+  // Operativos × HH por Día de mano de obra indirecta), para que quede
+  // consistente con lo que Excel muestra en esa fila sin depender de una
+  // fórmula que nosotros mismos tengamos que reproducir en dos lugares.
+  const hhPorDia = Number(hojaDR.getCell('J9').value) || 0
+  const sumarHoras = (horas: (number | null | undefined)[] | undefined) => (horas ?? []).reduce((acc: number, h) => acc + (h ?? 0), 0)
+
+  const hoyDirectas = parte.mano_obra_directa.reduce((acc, linea) => acc + sumarHoras(linea.horas_por_actividad), 0)
+  const hoyHm = parte.maquinaria.reduce((acc, linea) => acc + sumarHoras(linea.horas_por_actividad), 0)
+  const hoyIndirectas = parte.mano_obra_indirecta.reduce((acc, linea) => acc + hhPorDia * (linea.operativos ?? 0), 0)
+
+  if (parte.hh_directas_acumuladas != null) hojaDR.getCell('D80').value = parte.hh_directas_acumuladas - hoyDirectas
+  if (parte.hm_acumuladas != null) hojaDR.getCell('I80').value = parte.hm_acumuladas - hoyHm
+  if (parte.hh_indirectas_acumuladas != null) hojaDR.getCell('N80').value = parte.hh_indirectas_acumuladas - hoyIndirectas
 
   // ---------- Comentarios ----------
-  if (parte.comentario_contratista_autor) hojaDR.getCell('B83').value = parte.comentario_contratista_autor
-  if (parte.comentario_contratista) hojaDR.getCell('D83').value = parte.comentario_contratista
-  if (parte.comentario_mandante_autor) hojaDR.getCell('B88').value = parte.comentario_mandante_autor
-  if (parte.comentario_mandante) hojaDR.getCell('D88').value = parte.comentario_mandante
+  if (parte.comentario_contratista_autor) hojaDR.getCell('B84').value = parte.comentario_contratista_autor
+  if (parte.comentario_contratista) hojaDR.getCell('D84').value = parte.comentario_contratista
+  if (parte.comentario_mandante_autor) hojaDR.getCell('B89').value = parte.comentario_mandante_autor
+  if (parte.comentario_mandante) hojaDR.getCell('D89').value = parte.comentario_mandante
 
   // ---------- Coordinador de Terreno (nombre) ----------
   // La plantilla trae "Ericson Ramirez" fijo en esta celda; se sobrescribe
@@ -441,7 +498,13 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
       // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
       // objetos planos {col, row} sin problema — es un typing de ExcelJS
       // más estricto que su propio comportamiento real.
-      hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br } as any)
+      // editAs: 'twoCell' es a propósito — ExcelJS por defecto usa 'oneCell'
+      // ("mover pero no cambiar tamaño con las celdas"), que es lo pensado
+      // para una imagen normal pegada en una celda, NO para esta grilla de
+      // fotos con recuadro fijo. Ver nota junto a corregirAnclasFotos() más
+      // abajo sobre por qué esto importaba (fotos de tamaños distintos en
+      // Excel real).
+      hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br, editAs: 'twoCell' } as any)
 
       if (foto.caption) {
         hojaImagenes.getRow(celda.filaLeyenda + 1).getCell(celda.colLeyenda + 1).value = foto.caption

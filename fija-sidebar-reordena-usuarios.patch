@@ -1,0 +1,85 @@
+From 6c3e00fdc47997577f3aa426674a825c7bdb3ae7 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 23 Aug 2026 13:52:11 +0000
+Subject: [PATCH] =?UTF-8?q?Fija=20la=20barra=20lateral=20y=20reordena=20Us?=
+ =?UTF-8?q?uarios=20justo=20arriba=20de=20Configuraci=C3=B3n?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+La sidebar ahora usa position:fixed (antes se movía junto con el
+contenido si la página llegaba a hacer scroll); el contenido principal
+compensa con margin-left del mismo ancho, animado igual que el
+expand/collapse. Usuarios se movió de junto a Documentos/Historial a
+quedar inmediatamente arriba de Configuración.
+---
+ src/components/Layout/Layout.tsx | 32 +++++++++++++++++++++-----------
+ 1 file changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/src/components/Layout/Layout.tsx b/src/components/Layout/Layout.tsx
+index 298699c..5e728e8 100644
+--- a/src/components/Layout/Layout.tsx
++++ b/src/components/Layout/Layout.tsx
+@@ -22,8 +22,11 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
+ 
+   return (
+     <div className="h-screen bg-slate-50 flex">
+-      {/* Sidebar */}
+-      <div className={`${navExpanded ? 'w-64' : 'w-20'} bg-slate-900 text-white flex flex-col transition-all duration-200`}>
++      {/* Sidebar: fija (position fixed) para que no se mueva al hacer scroll
++          en el contenido — el contenido de al lado compensa con margin-left
++          del mismo ancho (ver más abajo), que también anima junto con el
++          expand/collapse. */}
++      <div className={`${navExpanded ? 'w-64' : 'w-20'} fixed inset-y-0 left-0 z-30 h-screen bg-slate-900 text-white flex flex-col transition-all duration-200`}>
+         {/* Toggle */}
+         <button
+           onClick={() => setNavExpanded(!navExpanded)}
+@@ -62,13 +65,6 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
+                 onClick={() => onViewChange('historial')}
+                 expanded={navExpanded}
+               />
+-              <NavItem
+-                icon="👤"
+-                label="Usuarios"
+-                active={activeView === 'usuarios'}
+-                onClick={() => onViewChange('usuarios')}
+-                expanded={navExpanded}
+-              />
+             </>
+           )}
+ 
+@@ -109,6 +105,18 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
+             />
+           )}
+ 
++          {/* Usuarios va justo arriba de Configuración a propósito (pedido
++              explícito) — antes estaba junto a Documentos/Historial. */}
++          {usuario?.rol === UserRole.COORDINADOR && (
++            <NavItem
++              icon="👤"
++              label="Usuarios"
++              active={activeView === 'usuarios'}
++              onClick={() => onViewChange('usuarios')}
++              expanded={navExpanded}
++            />
++          )}
++
+           <NavItem
+             icon="⚙️"
+             label="Configuración"
+@@ -137,8 +145,10 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
+         </div>
+       </div>
+ 
+-      {/* Main content */}
+-      <div className="flex-1 flex flex-col overflow-hidden">
++      {/* Main content: margin-left del mismo ancho que la sidebar (que ahora
++          es "fixed" y salió del flujo normal), para que no quede tapado
++          detrás de ella. */}
++      <div className={`flex-1 flex flex-col overflow-hidden ${navExpanded ? 'ml-64' : 'ml-20'} transition-all duration-200`}>
+         {/* Topbar */}
+         <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+           <h1 className="text-xl font-bold text-slate-900">Unificador QR</h1>
+-- 
+2.43.0
+

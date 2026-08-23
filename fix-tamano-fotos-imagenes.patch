@@ -1,0 +1,110 @@
+From 337e080557e57ec9fe89b9ca042544ff44654144 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 23 Aug 2026 12:38:03 +0000
+Subject: [PATCH] =?UTF-8?q?Corrige=20tama=C3=B1os=20distintos=20de=20fotos?=
+ =?UTF-8?q?=20en=20la=20hoja=20Im=C3=A1genes=20del=20Excel?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ExcelJS agrega noChangeAspect=1 y editAs=oneCell en cada foto insertada,
+sin opción de API para evitarlo. Excel real respeta ambos por encima del
+stretch/fillRect del blipFill: en vez de llenar el recuadro fijo de la
+grilla, muestra cada foto con su propia proporción original, así que
+fotos con distinto aspect ratio en la misma fila salían con distinta
+altura (LibreOffice no reproducía esto porque ignora esos atributos y
+siempre estira al recuadro).
+
+Fix: editAs='twoCell' al insertar (vía addImage) y noChangeAspect=0 en
+post-procesamiento XML (mismo mecanismo que el redondeo de esquinas),
+acotado solo a anclas de fotos — las firmas mantienen su proporción
+original a propósito, no se tocan.
+---
+ src/lib/generarExcelParteDiario.ts | 48 +++++++++++++++++++++++-------
+ 1 file changed, 38 insertions(+), 10 deletions(-)
+
+diff --git a/src/lib/generarExcelParteDiario.ts b/src/lib/generarExcelParteDiario.ts
+index 98ae5df..ee91e1b 100644
+--- a/src/lib/generarExcelParteDiario.ts
++++ b/src/lib/generarExcelParteDiario.ts
+@@ -51,20 +51,42 @@ const N_ANCLAS_PLANTILLA_IMAGENES = 2
+ // presente.
+ const RADIO_ESQUINA_FOTO = 3000 // 3% del lado más corto
+ 
+-// numFotos acota el redondeo a las anclas que de verdad son fotos: las
++// Fotos de distinto tamaño/proporción en la misma fila de la grilla (ej.
++// una foto horizontal 4:3 junto a una vertical) se veían con distinta
++// ALTURA en Excel real, aunque el recuadro (xdr:from/xdr:to) de las tres
++// fuera idéntico — se verificó con fotos de prueba de proporciones muy
++// distintas que el XML generado tenía las mismas coordenadas de recuadro
++// para las tres, así que no era un bug de calcularCeldaFoto().
++//
++// La causa: ExcelJS agrega SIEMPRE <a:picLocks noChangeAspect="1"/> en
++// cada foto (no hay forma de pedirle lo contrario por API). Ese atributo
++// le dice a Excel "no permitas una escala no-uniforme de esta imagen", y
++// Excel real (a diferencia de LibreOffice, que ignoraba esto y siempre
++// hacía caso al <a:stretch><a:fillRect/></a:stretch> del blipFill) lo
++// respeta incluso en el recuadro inicial: en vez de estirar la foto para
++// llenar el recuadro fijo de la grilla, la muestra con SU proporción
++// original — de ahí que cada foto saliera de una altura distinta según su
++// propia relación ancho/alto, no según el recuadro. Por eso acá se lo
++// sacamos (solo a las fotos, no a las firmas, donde sí queremos mantener
++// la proporción original — ver CajaFirma más abajo).
++//
++// numFotos acota ambos ajustes a las anclas que de verdad son fotos: las
+ // primeras N_ANCLAS_PLANTILLA_IMAGENES son los logos (no se tocan) y todo
+ // lo que venga después de "logos + fotos" son las firmas digitales que se
+-// agregan más abajo (tampoco se tocan — sus esquinas deben quedar rectas).
+-function redondearEsquinasFotos(xmlDrawing: string, numFotos: number): string {
++// agregan más abajo (tampoco se tocan — deben quedar con esquinas rectas
++// y proporción fija).
++function corregirAnclasFotos(xmlDrawing: string, numFotos: number): string {
+   let contador = 0
+   return xmlDrawing.replace(/<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g, (bloque) => {
+     contador += 1
+     const esFoto = contador > N_ANCLAS_PLANTILLA_IMAGENES && contador <= N_ANCLAS_PLANTILLA_IMAGENES + numFotos
+     if (!esFoto) return bloque
+-    return bloque.replace(
+-      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
+-      `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${RADIO_ESQUINA_FOTO}"/></a:avLst></a:prstGeom>`
+-    )
++    return bloque
++      .replace(
++        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
++        `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${RADIO_ESQUINA_FOTO}"/></a:avLst></a:prstGeom>`
++      )
++      .replace('<a:picLocks noChangeAspect="1"/>', '<a:picLocks noChangeAspect="0"/>')
+   })
+ }
+ 
+@@ -210,10 +232,10 @@ async function posprocesarExcel(
+     zipGenerado.file(contentTypesPath, contentTypes.replace('</Types>', `${override}</Types>`))
+   }
+ 
+-  // ---- 2. Esquinas redondeadas en las fotos (hoja Imágenes) ----
++  // ---- 2. Esquinas redondeadas + tamaño de recuadro fijo en las fotos (hoja Imágenes) ----
+   const drawing2Path = 'xl/drawings/drawing2.xml'
+   const drawing2 = await zipGenerado.file(drawing2Path)?.async('string')
+-  if (drawing2) zipGenerado.file(drawing2Path, redondearEsquinasFotos(drawing2, numFotosInsertadas))
++  if (drawing2) zipGenerado.file(drawing2Path, corregirAnclasFotos(drawing2, numFotosInsertadas))
+ 
+   // ---- 3. Firmas digitales (hojas DR e Imágenes) ----
+   const firmasParaCaja = (cajaCoordinador: CajaFirma, cajaSara: CajaFirma): FirmaAInsertar[] => {
+@@ -441,7 +463,13 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+       // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
+       // objetos planos {col, row} sin problema — es un typing de ExcelJS
+       // más estricto que su propio comportamiento real.
+-      hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br } as any)
++      // editAs: 'twoCell' es a propósito — ExcelJS por defecto usa 'oneCell'
++      // ("mover pero no cambiar tamaño con las celdas"), que es lo pensado
++      // para una imagen normal pegada en una celda, NO para esta grilla de
++      // fotos con recuadro fijo. Ver nota junto a corregirAnclasFotos() más
++      // abajo sobre por qué esto importaba (fotos de tamaños distintos en
++      // Excel real).
++      hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br, editAs: 'twoCell' } as any)
+ 
+       if (foto.caption) {
+         hojaImagenes.getRow(celda.filaLeyenda + 1).getCell(celda.colLeyenda + 1).value = foto.caption
+-- 
+2.43.0
+

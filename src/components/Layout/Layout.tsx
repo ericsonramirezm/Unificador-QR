@@ -22,8 +22,11 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
 
   return (
     <div className="h-screen bg-slate-50 flex">
-      {/* Sidebar */}
-      <div className={`${navExpanded ? 'w-64' : 'w-20'} bg-slate-900 text-white flex flex-col transition-all duration-200`}>
+      {/* Sidebar: fija (position fixed) para que no se mueva al hacer scroll
+          en el contenido — el contenido de al lado compensa con margin-left
+          del mismo ancho (ver más abajo), que también anima junto con el
+          expand/collapse. */}
+      <div className={`${navExpanded ? 'w-64' : 'w-20'} fixed inset-y-0 left-0 z-30 h-screen bg-slate-900 text-white flex flex-col transition-all duration-200`}>
         {/* Toggle */}
         <button
           onClick={() => setNavExpanded(!navExpanded)}
@@ -60,13 +63,6 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
                 label="Historial"
                 active={activeView === 'historial'}
                 onClick={() => onViewChange('historial')}
-                expanded={navExpanded}
-              />
-              <NavItem
-                icon="👤"
-                label="Usuarios"
-                active={activeView === 'usuarios'}
-                onClick={() => onViewChange('usuarios')}
                 expanded={navExpanded}
               />
             </>
@@ -109,6 +105,18 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
             />
           )}
 
+          {/* Usuarios va justo arriba de Configuración a propósito (pedido
+              explícito) — antes estaba junto a Documentos/Historial. */}
+          {usuario?.rol === UserRole.COORDINADOR && (
+            <NavItem
+              icon="👤"
+              label="Usuarios"
+              active={activeView === 'usuarios'}
+              onClick={() => onViewChange('usuarios')}
+              expanded={navExpanded}
+            />
+          )}
+
           <NavItem
             icon="⚙️"
             label="Configuración"
@@ -137,8 +145,10 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Main content: margin-left del mismo ancho que la sidebar (que ahora
+          es "fixed" y salió del flujo normal), para que no quede tapado
+          detrás de ella. */}
+      <div className={`flex-1 flex flex-col overflow-hidden ${navExpanded ? 'ml-64' : 'ml-20'} transition-all duration-200`}>
         {/* Topbar */}
         <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-bold text-slate-900">Unificador QR</h1>

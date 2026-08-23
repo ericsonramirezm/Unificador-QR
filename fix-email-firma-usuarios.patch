@@ -1,0 +1,35 @@
+From 76dfb6229e7e1898eceffca1b10aad1a1c7a573c Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sun, 23 Aug 2026 12:10:16 +0000
+Subject: [PATCH] Corrige el email en add_firma_usuarios.sql al de la cuenta
+ real de Ericson
+
+El script original usaba ericsonramirezm@gmail.com; el email real con el
+que Ericson entra a Unificador QR es eramirez@wilug.cl, por eso el UPDATE
+no encontraba ninguna fila y firma_url quedaba en NULL.
+---
+ add_firma_usuarios.sql | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/add_firma_usuarios.sql b/add_firma_usuarios.sql
+index 08feb10..e65e9e8 100644
+--- a/add_firma_usuarios.sql
++++ b/add_firma_usuarios.sql
+@@ -29,9 +29,13 @@ comment on column public.usuarios.firma_url is
+ 
+ -- Firma de Ericson Ramirez (ya estaba cargada como firma fija en el Excel
+ -- desde antes de esta migración — acá solo se formaliza en la tabla).
++-- OJO: eramirez@wilug.cl es el correo con el que Ericson entra a
++-- Unificador QR (tabla usuarios) — no es el mismo que usa para otras
++-- cosas, así que si esto no encuentra ninguna fila, confirmar el email
++-- real en la tabla usuarios antes de asumir que es este.
+ update public.usuarios
+ set firma_url = '/firmas/ericson-ramirez.png'
+-where email = 'ericsonramirezm@gmail.com';
++where email = 'eramirez@wilug.cl';
+ 
+ -- Cuando llegue la firma del otro coordinador, agregar su imagen en
+ -- public/firmas/ y descomentar/adaptar esto:
+-- 
+2.43.0
+

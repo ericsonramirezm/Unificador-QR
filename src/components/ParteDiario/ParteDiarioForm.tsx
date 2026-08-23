@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { db, storage } from '@lib/supabase'
 import {
   ActividadEjecutada,
@@ -82,13 +83,22 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
 
   const [fecha, setFecha] = useState(() => parteExistente?.fecha ?? new Date().toISOString().slice(0, 10))
   const [condicionClimatica, setCondicionClimatica] = useState(() => parteExistente?.condicion_climatica ?? '')
-  // La faena se elige solo al crear el reporte: cambiarla después no
-  // recalcula los acumulados (ver "Al editar NO se tocan las columnas
-  // *_acumuladas" más abajo en guardar()), así que si se pudiera editar
-  // libremente un reporte ya guardado quedaría con datos de una faena
-  // pero acumulados de la cadena de otra. Por eso el selector se
-  // deshabilita en edición (ver el <select> más abajo).
+  // La faena se elige solo una vez: al crear un reporte nuevo, mediante la
+  // ventana obligatoria de abajo (ver <Dialog.Root> más abajo en el
+  // render); al editar uno existente, ya viene fija desde parteExistente.
+  // En ningún caso se puede cambiar después — cambiarla no recalcula los
+  // acumulados (ver "Al editar NO se tocan las columnas *_acumuladas" más
+  // abajo en guardar()), así que si se pudiera editar libremente un
+  // reporte ya guardado quedaría con datos de una faena pero acumulados
+  // de la cadena de otra.
   const [faena, setFaena] = useState<Faena>(() => parteExistente?.faena ?? Faena.LT)
+  // Controla la ventana obligatoria de selección de faena al crear un
+  // reporte nuevo: arranca sin elegir (false) solo cuando !editando: el
+  // formulario completo queda tapado por la ventana hasta que el usuario
+  // toca "Las Tórtolas" o "Los Bronces" — no hay forma de cerrarla sin
+  // elegir (pedido explícito, ver conversación). Al editar, ya está
+  // "elegida" de entrada porque la faena viene fija desde parteExistente.
+  const [faenaElegida, setFaenaElegida] = useState<boolean>(editando)
   const [actividades, setActividades] = useState<ActividadEjecutada[]>(() =>
     parteExistente && parteExistente.actividades.length > 0
       ? parteExistente.actividades.map((a) => ({ ...a }))
@@ -378,6 +388,47 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-8">
+      {/* Ventana obligatoria de faena: solo al crear (no editando) y solo
+          hasta que se elija. No se puede cerrar sin elegir — sin botón de
+          cerrar, sin Dialog.Close, e ignorando Esc/click afuera. El resto
+          del formulario igual se renderiza detrás (el overlay bloquea la
+          interacción), así que el N° de reporte ya está listo apenas se
+          cierra la ventana. */}
+      {!editando && !faenaElegida && (
+        <Dialog.Root open onOpenChange={() => {}}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 bg-black/50 z-40" />
+            <Dialog.Content
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-white rounded-lg shadow-xl z-50 p-6"
+              onEscapeKeyDown={(e) => e.preventDefault()}
+              onInteractOutside={(e) => e.preventDefault()}
+            >
+              <Dialog.Title className="text-lg font-bold text-slate-900 mb-1">
+                ¿Qué faena es este Daily Report?
+              </Dialog.Title>
+              <Dialog.Description className="text-sm text-slate-500 mb-4">
+                Elige una faena para continuar. No se podrá cambiar después de este paso.
+              </Dialog.Description>
+              <div className="space-y-2">
+                {Object.values(Faena).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => {
+                      setFaena(f)
+                      setFaenaElegida(true)
+                    }}
+                    className="w-full text-left px-4 py-3 border border-slate-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-colors font-semibold text-slate-800"
+                  >
+                    {FAENA_LABELS[f]}
+                  </button>
+                ))}
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-slate-900">
@@ -405,7 +456,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
             <select
               value={faena}
               onChange={(e) => setFaena(e.target.value as Faena)}
-              disabled={editando}
+              disabled={faenaElegida}
               className={`${inputClase} disabled:bg-slate-100 disabled:text-slate-500`}
             >
               {Object.values(Faena).map((f) => (
@@ -414,10 +465,8 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
                 </option>
               ))}
             </select>
-            {editando && (
-              <p className="text-xs text-slate-400 mt-1">
-                La faena no se puede cambiar una vez creado el reporte.
-              </p>
+            {faenaElegida && (
+              <p className="text-xs text-slate-400 mt-1">La faena queda fija para este reporte.</p>
             )}
           </div>
           <div>

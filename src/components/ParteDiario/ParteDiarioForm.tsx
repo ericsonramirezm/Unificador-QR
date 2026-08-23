@@ -5,6 +5,9 @@ import {
   CARGOS_DIRECTOS,
   CARGOS_INDIRECTOS,
   EQUIPOS_MAQUINARIA,
+  Faena,
+  FAENA_LABELS,
+  HH_TURNO_POR_FAENA,
   ParteDiario,
   ParteDiarioEstado,
   Usuario,
@@ -25,11 +28,13 @@ interface ParteDiarioFormProps {
 const MAX_ACTIVIDADES = 7
 
 // Control interno: la suma de "Cantidad" (HH x actividad) de Actividades
-// Ejecutadas debe llegar a este mínimo para poder enviar el reporte.
-// Aplica solo al enviar (nuevo envío o borrador→enviado) — no bloquea
-// "Guardar borrador" ni "Guardar cambios" sobre un reporte ya enviado
-// (pedido explícito, ver conversación del 2026-08-23).
-const MIN_HH_ACTIVIDADES = 10
+// Ejecutadas debe llegar al mínimo de HH_TURNO_POR_FAENA[faena] para
+// poder enviar el reporte. Aplica solo al enviar (nuevo envío o
+// borrador→enviado) — no bloquea "Guardar borrador" ni "Guardar cambios"
+// sobre un reporte ya enviado (pedido explícito, ver conversación del
+// 2026-08-23). El mismo HH_TURNO_POR_FAENA también define "HH por Día"
+// (J9 del Excel) y el multiplicador de HH Total de Fuerza laboral
+// indirecta — antes fijo en 10/11 para todos, ahora depende de la faena.
 
 const actividadVacia = (): ActividadEjecutada => ({ area: '', descripcion: '', cantidad: null })
 
@@ -77,6 +82,13 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
 
   const [fecha, setFecha] = useState(() => parteExistente?.fecha ?? new Date().toISOString().slice(0, 10))
   const [condicionClimatica, setCondicionClimatica] = useState(() => parteExistente?.condicion_climatica ?? '')
+  // La faena se elige solo al crear el reporte: cambiarla después no
+  // recalcula los acumulados (ver "Al editar NO se tocan las columnas
+  // *_acumuladas" más abajo en guardar()), así que si se pudiera editar
+  // libremente un reporte ya guardado quedaría con datos de una faena
+  // pero acumulados de la cadena de otra. Por eso el selector se
+  // deshabilita en edición (ver el <select> más abajo).
+  const [faena, setFaena] = useState<Faena>(() => parteExistente?.faena ?? Faena.LT)
   const [actividades, setActividades] = useState<ActividadEjecutada[]>(() =>
     parteExistente && parteExistente.actividades.length > 0
       ? parteExistente.actividades.map((a) => ({ ...a }))
@@ -222,16 +234,17 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
 
   // ---------- Totales calculados (mismas fórmulas que el Excel) ----------
   const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(calcularHorasCargo(f))))
-  const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => 11 * f.operativos))
+  const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => HH_TURNO_POR_FAENA[faena] * f.operativos))
   const totalHm = sumar(maquinaria.map((f) => sumar(f.horas.slice(0, numActividades))))
 
   // Suma de "Cantidad" (HH x actividad) de Actividades Ejecutadas — es
   // solo control interno de visualización + validación al enviar (ver
-  // MIN_HH_ACTIVIDADES más abajo), no alimenta ninguna celda del Excel.
+  // HH_TURNO_POR_FAENA más abajo), no alimenta ninguna celda del Excel.
   const totalHhActividades = sumar(actividades.slice(0, numActividades).map((a) => a.cantidad ?? 0))
   // Redondeo a 2 decimales para evitar artefactos de punto flotante
   // (ej: 0.1 + 0.2) al mostrar/comparar la suma.
   const totalHhActividadesRedondeado = Math.round(totalHhActividades * 100) / 100
+  const minHhActividades = HH_TURNO_POR_FAENA[faena]
 
   const guardar = async (estadoFinal: ParteDiarioEstado.BORRADOR | ParteDiarioEstado.ENVIADO) => {
     if (!contrato?.id) return
@@ -241,10 +254,10 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
     // borrador→enviado). No aplica a "Guardar borrador" ni a "Guardar
     // cambios" sobre un reporte que ya estaba enviado (estadoBloqueado) —
     // ese botón reutiliza estadoFinal=ENVIADO pero es una corrección de
-    // datos, no un envío nuevo.
-    if (estadoFinal === ParteDiarioEstado.ENVIADO && !estadoBloqueado && totalHhActividadesRedondeado < MIN_HH_ACTIVIDADES) {
+    // datos, no un envío nuevo. El mínimo depende de la faena elegida.
+    if (estadoFinal === ParteDiarioEstado.ENVIADO && !estadoBloqueado && totalHhActividadesRedondeado < minHhActividades) {
       setError(
-        `La suma de HH x actividad es ${totalHhActividadesRedondeado} y debe llegar al menos a ${MIN_HH_ACTIVIDADES} HH para enviar el reporte. Puedes guardarlo como borrador mientras completas las actividades.`
+        `La suma de HH x actividad es ${totalHhActividadesRedondeado} y debe llegar al menos a ${minHhActividades} HH (mínimo de ${FAENA_LABELS[faena]}) para enviar el reporte. Puedes guardarlo como borrador mientras completas las actividades.`
       )
       return
     }
@@ -258,6 +271,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
       const camposComunes = {
         fecha,
         condicion_climatica: condicionClimatica || null,
+        faena,
 
         actividades: actividadesValidas,
         mano_obra_directa: manoObraDirecta.map((f) => ({
@@ -307,7 +321,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
         }
         parte = await db.actualizarParteDiario(parteExistente.id, updates)
       } else {
-        const ultimoParte = await db.obtenerUltimoParteDiario(contrato.id)
+        const ultimoParte = await db.obtenerUltimoParteDiario(contrato.id, faena)
         parte = await db.crearParteDiario({
           contrato_id: contrato.id,
           numero_reporte: numeroReporte,
@@ -385,7 +399,27 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
       {/* Encabezado */}
       <section>
         <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">Encabezado</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Faena</label>
+            <select
+              value={faena}
+              onChange={(e) => setFaena(e.target.value as Faena)}
+              disabled={editando}
+              className={`${inputClase} disabled:bg-slate-100 disabled:text-slate-500`}
+            >
+              {Object.values(Faena).map((f) => (
+                <option key={f} value={f}>
+                  {FAENA_LABELS[f]}
+                </option>
+              ))}
+            </select>
+            {editando && (
+              <p className="text-xs text-slate-400 mt-1">
+                La faena no se puede cambiar una vez creado el reporte.
+              </p>
+            )}
+          </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Fecha</label>
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className={inputClase} />
@@ -459,8 +493,8 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
         </div>
 
         {/* Suma de HH x actividad — solo visualización + control interno
-            para el bloqueo de envío (ver MIN_HH_ACTIVIDADES). No es una
-            celda del Excel. */}
+            para el bloqueo de envío (ver HH_TURNO_POR_FAENA, el mínimo
+            depende de la faena elegida arriba). No es una celda del Excel. */}
         <div className="grid grid-cols-1 sm:grid-cols-[24px_1fr_2fr_100px_32px] gap-2 items-center mt-2 pt-2 border-t border-slate-200">
           <span />
           <span className="sm:col-span-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">
@@ -468,16 +502,16 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
           </span>
           <span
             className={`text-sm font-semibold text-right ${
-              totalHhActividadesRedondeado < MIN_HH_ACTIVIDADES ? 'text-red-600' : 'text-emerald-600'
+              totalHhActividadesRedondeado < minHhActividades ? 'text-red-600' : 'text-emerald-600'
             }`}
           >
             {totalHhActividadesRedondeado}
           </span>
           <span />
         </div>
-        {totalHhActividadesRedondeado < MIN_HH_ACTIVIDADES && (
+        {totalHhActividadesRedondeado < minHhActividades && (
           <p className="text-xs text-red-500 text-right mt-1">
-            Mínimo {MIN_HH_ACTIVIDADES} HH para poder enviar el reporte.
+            Mínimo {minHhActividades} HH ({FAENA_LABELS[faena]}) para poder enviar el reporte.
           </p>
         )}
       </section>
@@ -655,7 +689,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
                 <th className="text-right py-1 px-1 w-24">Contratados</th>
                 <th className="text-right py-1 px-1 w-24">Operativos</th>
                 <th className="text-right py-1 px-1 w-24">Permiso/Desc.</th>
-                <th className="text-right py-1 pl-1 w-24">HH Total (×11)</th>
+                <th className="text-right py-1 pl-1 w-24">HH Total (×{HH_TURNO_POR_FAENA[faena]})</th>
               </tr>
             </thead>
             <tbody>

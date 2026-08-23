@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
-import { ParteDiario, UserRole } from '@/types/index'
+import { FAENA_LABELS, HH_TURNO_POR_FAENA, ParteDiario, UserRole } from '@/types/index'
 
 // Genera el Daily Report en Excel EXACTAMENTE con el formato original: se
 // abre la plantilla en blanco (public/plantillas/DR000_12501191.xlsx, la
@@ -377,6 +377,15 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   hojaDR.getCell('C5').value = String(parte.numero_reporte).padStart(3, '0')
   hojaDR.getCell('J5').value = new Date(`${parte.fecha}T00:00:00`)
   if (parte.condicion_climatica) hojaDR.getCell('K10').value = parte.condicion_climatica
+  // Fila 11 ("Faena :") agregada a la plantilla para la división Las
+  // Tórtolas / Los Bronces — ver add_faena_partes_diarios.sql.
+  hojaDR.getCell('C11').value = FAENA_LABELS[parte.faena]
+  // "HH por Día" (J9): ya no es un valor fijo de la plantilla — de acá
+  // dependen tanto las fórmulas de HH Total de Fuerza laboral indirecta
+  // ($J$9*E<fila>, ver G64/G65 de la plantilla) como el cálculo de HH
+  // Indirectas acumuladas más abajo (hhPorDia). Antes de esta división
+  // por faena, J9 quedaba en el 10 fijo de la plantilla.
+  hojaDR.getCell('J9').value = HH_TURNO_POR_FAENA[parte.faena]
 
   // ---------- Actividades ejecutadas (máx. 7, mismo límite que el formulario) ----------
   parte.actividades.slice(0, 7).forEach((actividad, i) => {
@@ -540,7 +549,7 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
 
 export function nombreArchivoParteDiario(parte: ParteDiario): string {
   const fecha = parte.fecha.replace(/-/g, '.')
-  return `DR${String(parte.numero_reporte).padStart(3, '0')}_12501191_${fecha}_LT.xlsx`
+  return `DR${String(parte.numero_reporte).padStart(3, '0')}_12501191_${fecha}_${parte.faena}.xlsx`
 }
 
 export function descargarBlob(blob: Blob, nombreArchivo: string) {

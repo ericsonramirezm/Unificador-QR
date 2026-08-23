@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { db } from '@lib/supabase'
-import { ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
+import { FAENA_LABELS, ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
 import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
 import { puedeEditar, puedeEliminar } from './permisos'
 
@@ -116,7 +116,9 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: Par
             <h2 className="text-xl font-bold text-slate-900">
               Daily Report N° {String(parte.numero_reporte).padStart(3, '0')}
             </h2>
-            <p className="text-sm text-slate-500">{parte.fecha} · {parte.condicion_climatica ?? 'Sin condición registrada'}</p>
+            <p className="text-sm text-slate-500">
+              {FAENA_LABELS[parte.faena]} · {parte.fecha} · {parte.condicion_climatica ?? 'Sin condición registrada'}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{parte.estado}</span>

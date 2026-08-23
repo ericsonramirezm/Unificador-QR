@@ -366,10 +366,15 @@ export const db = {
     return data as number
   },
 
-  // El último parte del contrato ya trae, en sus columnas *_acumuladas, la
-  // suma de todos los anteriores — así que el acumulado del parte nuevo es
-  // "el de este + lo que traiga este mismo objeto" (ver nota en la migración).
-  async obtenerUltimoParteDiario(contratoId: string) {
+  // El último parte de la MISMA faena ya trae, en sus columnas
+  // *_acumuladas, la suma de todos los anteriores de esa faena — así que
+  // el acumulado del parte nuevo es "el de este + lo que traiga este
+  // mismo objeto" (ver nota en la migración). Cada faena corre su propia
+  // cadena de acumulados en paralelo (ver add_faena_partes_diarios.sql) —
+  // por eso el filtro por faena es tan importante acá como el de
+  // contrato_id: si tomara el último reporte de la OTRA faena como base,
+  // los acumulados de turno saldrían mal calculados.
+  async obtenerUltimoParteDiario(contratoId: string, faena: string) {
     // Por número de reporte, no por fecha (ver obtenerPartesDiarios) —
     // acá importa todavía más: si esto tomara el reporte equivocado como
     // "el último", los acumulados de turno del reporte nuevo saldrían
@@ -378,6 +383,7 @@ export const db = {
       .from('partes_diarios')
       .select('hh_directas_acumuladas, hm_acumuladas, hh_indirectas_acumuladas')
       .eq('contrato_id', contratoId)
+      .eq('faena', faena)
       .order('numero_reporte', { ascending: false })
       .limit(1)
       .maybeSingle()

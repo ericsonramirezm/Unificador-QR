@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { db } from '@lib/supabase'
-import { ParteDiario, ParteDiarioEstado, Usuario } from '@/types/index'
+import { Faena, FAENA_LABELS, ParteDiario, ParteDiarioEstado, Usuario } from '@/types/index'
 import { ParteDiarioForm } from './ParteDiarioForm'
 import { ParteDiarioDetalle } from './ParteDiarioDetalle'
 import { puedeCrear, puedeEditar, puedeEliminar } from './permisos'
@@ -130,30 +130,57 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
 
       {!isLoading && partes.length > 0 && (() => {
         // partes viene ordenado por numero_reporte descendente (ver
-        // obtenerPartesDiarios), así que partes[0] es el último Daily
-        // Report — y sus columnas *_acumuladas ya traen la suma de todos
-        // los anteriores más las de él mismo. No hay que sumar columna por
-        // columna a través de todas las filas: cada "acumuladas" es un
-        // snapshot corrido, no un delta — sumarlas todas contaría de más.
-        const ultimo = partes[0]
+        // obtenerPartesDiarios) y el correlativo es único y compartido
+        // entre ambas faenas, así que el primer reporte que aparezca de
+        // cada faena es su más reciente — y sus columnas *_acumuladas ya
+        // traen la suma corrida de todos los anteriores DE ESA FAENA (cada
+        // faena corre su propia cadena, ver obtenerUltimoParteDiario). El
+        // total general del contrato es la suma de esos dos snapshots —
+        // no hay que sumar columna por columna a través de todas las
+        // filas, cada "acumuladas" ya es un corrido, no un delta.
+        const ultimoLT = partes.find((p) => p.faena === Faena.LT)
+        const ultimoLB = partes.find((p) => p.faena === Faena.LB)
+        const filas = [
+          { etiqueta: FAENA_LABELS[Faena.LT], parte: ultimoLT },
+          { etiqueta: FAENA_LABELS[Faena.LB], parte: ultimoLB },
+        ]
+        const totalGeneral = {
+          directas: (ultimoLT?.hh_directas_acumuladas ?? 0) + (ultimoLB?.hh_directas_acumuladas ?? 0),
+          hm: (ultimoLT?.hm_acumuladas ?? 0) + (ultimoLB?.hm_acumuladas ?? 0),
+          indirectas: (ultimoLT?.hh_indirectas_acumuladas ?? 0) + (ultimoLB?.hh_indirectas_acumuladas ?? 0),
+        }
         return (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-white rounded-lg border border-slate-200 p-4">
-              <p className="text-xs text-slate-500 uppercase">Daily Reports</p>
-              <p className="text-2xl font-bold text-slate-900">{partes.length}</p>
+          <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">HH acumuladas por faena</h3>
+              <span className="text-xs text-slate-400">{partes.length} Daily Report{partes.length === 1 ? '' : 's'}</span>
             </div>
-            <div className="bg-white rounded-lg border border-slate-200 p-4">
-              <p className="text-xs text-slate-500 uppercase">HH Directas acum.</p>
-              <p className="text-2xl font-bold text-slate-900">{ultimo.hh_directas_acumuladas ?? 0}</p>
-            </div>
-            <div className="bg-white rounded-lg border border-slate-200 p-4">
-              <p className="text-xs text-slate-500 uppercase">HM Maquinaria acum.</p>
-              <p className="text-2xl font-bold text-slate-900">{ultimo.hm_acumuladas ?? 0}</p>
-            </div>
-            <div className="bg-white rounded-lg border border-slate-200 p-4">
-              <p className="text-xs text-slate-500 uppercase">HH Indirectas acum.</p>
-              <p className="text-2xl font-bold text-slate-900">{ultimo.hh_indirectas_acumuladas ?? 0}</p>
-            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-4 py-2">Faena</th>
+                  <th className="text-right px-4 py-2">HH Directas</th>
+                  <th className="text-right px-4 py-2">HM Maquinaria</th>
+                  <th className="text-right px-4 py-2">HH Indirectas</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filas.map(({ etiqueta, parte }) => (
+                  <tr key={etiqueta}>
+                    <td className="px-4 py-2 text-slate-700">{etiqueta}</td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-900">{parte?.hh_directas_acumuladas ?? 0}</td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-900">{parte?.hm_acumuladas ?? 0}</td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-900">{parte?.hh_indirectas_acumuladas ?? 0}</td>
+                  </tr>
+                ))}
+                <tr className="bg-slate-50 font-semibold">
+                  <td className="px-4 py-2 text-slate-900">Total general</td>
+                  <td className="px-4 py-2 text-right font-mono text-slate-900">{totalGeneral.directas}</td>
+                  <td className="px-4 py-2 text-right font-mono text-slate-900">{totalGeneral.hm}</td>
+                  <td className="px-4 py-2 text-right font-mono text-slate-900">{totalGeneral.indirectas}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         )
       })()}
@@ -168,6 +195,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
               <tr>
                 <th className="text-left px-4 py-3">N°</th>
+                <th className="text-left px-4 py-3">Faena</th>
                 <th className="text-left px-4 py-3">Fecha</th>
                 <th className="text-left px-4 py-3">Creado por</th>
                 <th className="text-left px-4 py-3">Estado</th>
@@ -183,6 +211,14 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                 >
                   <td className="px-4 py-3 font-mono text-slate-700">
                     {String(parte.numero_reporte).padStart(3, '0')}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      title={FAENA_LABELS[parte.faena]}
+                      className="px-2 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600"
+                    >
+                      {parte.faena}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-slate-700">{parte.fecha}</td>
                   <td className="px-4 py-3 text-slate-700">{parte.usuario_creador?.nombre ?? '—'}</td>

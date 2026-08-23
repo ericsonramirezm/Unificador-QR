@@ -190,6 +190,33 @@ export enum ParteDiarioEstado {
   COMENTADO_MANDANTE = 'comentado_mandante',
 }
 
+// Los Daily Report del contrato 12501191 se dividen en dos faenas. El
+// correlativo de "Report N°" sigue siendo único y compartido entre ambas
+// (pedido explícito) — lo que se divide por faena son los acumulados de
+// HH (cada faena corre su propia cadena) y el mínimo de HH exigido.
+export enum Faena {
+  LT = 'LT',
+  LB = 'LB',
+}
+
+export const FAENA_LABELS: Record<Faena, string> = {
+  [Faena.LT]: 'Las Tórtolas',
+  [Faena.LB]: 'Los Bronces',
+}
+
+// HH de turno por faena — un solo número que define a la vez: (1) el
+// mínimo de HH x actividad para poder enviar el reporte, (2) "HH por Día"
+// (celda J9 del Excel, de la que ya dependen las fórmulas de HH Total de
+// Fuerza laboral indirecta y el cálculo de HH Indirectas acumuladas), y
+// (3) el multiplicador que se muestra en el formulario ("HH Total (×N)").
+// Antes de esta división, este valor estaba fijo en 10 (J9) o incluso
+// desincronizado en 11 (el literal hardcodeado en el formulario) — ver
+// conversación del 2026-08-23.
+export const HH_TURNO_POR_FAENA: Record<Faena, number> = {
+  [Faena.LT]: 10,
+  [Faena.LB]: 12,
+}
+
 export interface ActividadEjecutada {
   area: string;
   descripcion: string;
@@ -231,6 +258,7 @@ export interface ParteDiario {
   numero_reporte: number;
   fecha: string; // YYYY-MM-DD
   condicion_climatica?: string;
+  faena: Faena;
 
   actividades: ActividadEjecutada[];
   mano_obra_directa: LineaManoObra[];

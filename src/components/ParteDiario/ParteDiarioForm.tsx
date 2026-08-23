@@ -24,6 +24,13 @@ interface ParteDiarioFormProps {
 
 const MAX_ACTIVIDADES = 7
 
+// Control interno: la suma de "Cantidad" (HH x actividad) de Actividades
+// Ejecutadas debe llegar a este mínimo para poder enviar el reporte.
+// Aplica solo al enviar (nuevo envío o borrador→enviado) — no bloquea
+// "Guardar borrador" ni "Guardar cambios" sobre un reporte ya enviado
+// (pedido explícito, ver conversación del 2026-08-23).
+const MIN_HH_ACTIVIDADES = 10
+
 const actividadVacia = (): ActividadEjecutada => ({ area: '', descripcion: '', cantidad: null })
 
 // El campo "Cantidad" de Actividades Ejecutadas ahora guarda las HH que
@@ -218,9 +225,30 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
   const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => 11 * f.operativos))
   const totalHm = sumar(maquinaria.map((f) => sumar(f.horas.slice(0, numActividades))))
 
+  // Suma de "Cantidad" (HH x actividad) de Actividades Ejecutadas — es
+  // solo control interno de visualización + validación al enviar (ver
+  // MIN_HH_ACTIVIDADES más abajo), no alimenta ninguna celda del Excel.
+  const totalHhActividades = sumar(actividades.slice(0, numActividades).map((a) => a.cantidad ?? 0))
+  // Redondeo a 2 decimales para evitar artefactos de punto flotante
+  // (ej: 0.1 + 0.2) al mostrar/comparar la suma.
+  const totalHhActividadesRedondeado = Math.round(totalHhActividades * 100) / 100
+
   const guardar = async (estadoFinal: ParteDiarioEstado.BORRADOR | ParteDiarioEstado.ENVIADO) => {
     if (!contrato?.id) return
     if (!editando && numeroReporte === null) return
+
+    // Bloqueo duro de HH x actividad, solo al enviar (nuevo envío o
+    // borrador→enviado). No aplica a "Guardar borrador" ni a "Guardar
+    // cambios" sobre un reporte que ya estaba enviado (estadoBloqueado) —
+    // ese botón reutiliza estadoFinal=ENVIADO pero es una corrección de
+    // datos, no un envío nuevo.
+    if (estadoFinal === ParteDiarioEstado.ENVIADO && !estadoBloqueado && totalHhActividadesRedondeado < MIN_HH_ACTIVIDADES) {
+      setError(
+        `La suma de HH x actividad es ${totalHhActividadesRedondeado} y debe llegar al menos a ${MIN_HH_ACTIVIDADES} HH para enviar el reporte. Puedes guardarlo como borrador mientras completas las actividades.`
+      )
+      return
+    }
+
     setIsSaving(estadoFinal)
     setError(null)
 
@@ -429,6 +457,29 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
             </div>
           ))}
         </div>
+
+        {/* Suma de HH x actividad — solo visualización + control interno
+            para el bloqueo de envío (ver MIN_HH_ACTIVIDADES). No es una
+            celda del Excel. */}
+        <div className="grid grid-cols-1 sm:grid-cols-[24px_1fr_2fr_100px_32px] gap-2 items-center mt-2 pt-2 border-t border-slate-200">
+          <span />
+          <span className="sm:col-span-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            Total HH x actividad
+          </span>
+          <span
+            className={`text-sm font-semibold text-right ${
+              totalHhActividadesRedondeado < MIN_HH_ACTIVIDADES ? 'text-red-600' : 'text-emerald-600'
+            }`}
+          >
+            {totalHhActividadesRedondeado}
+          </span>
+          <span />
+        </div>
+        {totalHhActividadesRedondeado < MIN_HH_ACTIVIDADES && (
+          <p className="text-xs text-red-500 text-right mt-1">
+            Mínimo {MIN_HH_ACTIVIDADES} HH para poder enviar el reporte.
+          </p>
+        )}
       </section>
 
       {/* Fuerza laboral directa */}

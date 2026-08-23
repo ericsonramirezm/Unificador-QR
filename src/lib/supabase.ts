@@ -370,11 +370,15 @@ export const db = {
   // suma de todos los anteriores — así que el acumulado del parte nuevo es
   // "el de este + lo que traiga este mismo objeto" (ver nota en la migración).
   async obtenerUltimoParteDiario(contratoId: string) {
+    // Por número de reporte, no por fecha (ver obtenerPartesDiarios) —
+    // acá importa todavía más: si esto tomara el reporte equivocado como
+    // "el último", los acumulados de turno del reporte nuevo saldrían
+    // mal calculados.
     const { data, error } = await supabase
       .from('partes_diarios')
       .select('hh_directas_acumuladas, hm_acumuladas, hh_indirectas_acumuladas')
       .eq('contrato_id', contratoId)
-      .order('fecha', { ascending: false })
+      .order('numero_reporte', { ascending: false })
       .limit(1)
       .maybeSingle()
 
@@ -405,12 +409,25 @@ export const db = {
     return data
   },
 
+  // Solo coordinador tiene policy de delete sobre partes_diarios (apr no
+  // tiene — ver add_partes_diarios.sql), así que esto falla en el server
+  // si lo llama cualquier otro rol, incluso si la UI lo permitiera.
+  async eliminarParteDiario(id: string) {
+    const { error } = await supabase.from('partes_diarios').delete().eq('id', id)
+    if (error) throw error
+  },
+
   async obtenerPartesDiarios(contratoId: string) {
+    // Ordenado por número de reporte (no por fecha): dos reportes pueden
+    // crearse fuera de orden respecto a su fecha real (por ejemplo, un
+    // borrador atrasado que se envía después), y el número de reporte es
+    // el que de verdad refleja el orden de creación — es correlativo y
+    // se asigna con obtener_siguiente_numero_parte() al crear cada uno.
     const { data, error } = await supabase
       .from('partes_diarios')
-      .select('*, usuario_creador:creado_por(nombre, email, rol)')
+      .select('*, usuario_creador:creado_por(nombre, email, rol, firma_url)')
       .eq('contrato_id', contratoId)
-      .order('fecha', { ascending: false })
+      .order('numero_reporte', { ascending: false })
 
     if (error) throw error
     return data
@@ -419,7 +436,7 @@ export const db = {
   async obtenerParteDiario(id: string) {
     const { data, error } = await supabase
       .from('partes_diarios')
-      .select('*, usuario_creador:creado_por(nombre, email, rol)')
+      .select('*, usuario_creador:creado_por(nombre, email, rol, firma_url)')
       .eq('id', id)
       .single()
 

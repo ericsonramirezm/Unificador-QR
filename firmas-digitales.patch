@@ -1,0 +1,427 @@
+From 7317e73fe9cc598bafa04e37706837e3375720e5 Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sun, 23 Aug 2026 00:54:41 +0000
+Subject: [PATCH] Agrega firmas digitales de Ericson Ramirez y Sara Cofre al
+ Excel
+
+Se insertan en el bloque de firma de ambas hojas (DR e Imagenes), bajo
+Coordinador de Terreno (Ericson Ramirez) y Administrador Contrato (Sara
+Cofre) respectivamente. La hoja DR restaura su drawing completo desde la
+plantilla (por el grafico), asi que ahi no se puede usar la API de
+addImage de ExcelJS -- se inyectan directamente en el XML del drawing,
+igual que ya se hace con el grafico y las esquinas redondeadas de las
+fotos. Las imagenes de firma quedan en public/firmas/ y se referencian
+por URL fija (no dependen de ningun dato del reporte).
+---
+ public/firmas/ericson-ramirez.png  | Bin 0 -> 2952 bytes
+ public/firmas/sara-cofre.png       | Bin 0 -> 6182 bytes
+ src/lib/generarExcelParteDiario.ts | 152 +++++++++++++++++++++++++++--
+ 3 files changed, 146 insertions(+), 6 deletions(-)
+ create mode 100644 public/firmas/ericson-ramirez.png
+ create mode 100644 public/firmas/sara-cofre.png
+
+diff --git a/public/firmas/ericson-ramirez.png b/public/firmas/ericson-ramirez.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..ed755f4f913e933b37fa4b202e62065ddfbcdeb7
+GIT binary patch
+literal 2952
+zcmV;33wQL1P)<h;3K|Lk000e1NJLTq002t>0024&1^@s6_%Ni700001b5ch_0Itp)
+z=>Px#1ZP1_K>z@;j|==^1poj532;bRa{vGi!vFvd!vV){sAK>D3mr*BK~#8N?V8(f
+zTiJDozjNW?RTL@lCQGs;OSU{0+nHqInKqdL0t88lw#ifaCj=<+)PJKdMS-A2(V%@O
+z(3d6+nkJphv<OnWaVE)JJid%1%hp|@NKw4=9P-?DA0*QvMU5$uvYmmxx3kwi8=F6_
+zz4qFB9Z3iwIHN1%_J%W#=1i<(a3<C<I1}p_d@jU#R$G+xhq4>GLg2Up%W(nlC^CvH
+zAxjeL*$PN79v^6b?GQo;BuQ#-?ur*)EYo(#lyvllNv>ir8IOPrUXMz#T0@Z)!ag6r
+zo!jJV*Cr_I28l@MkRXohQg4`O9u<$Ow%EGmg<XcO5G>^iEa!_P2Lt@`FFs~C=*4jy
+zMk66&K_4^8VJ2e{Hh0Uo3jEVM_t-8ssMf9KI6?@@HG|!91;5XGVxf2u#S#Lxixtv^
+z3W-pV*~BoKst_IwGdmW?v|Z|^-Rv((aCI`lpS*T~^CJWN_{Ji4R|^OM)p~<M)j&}c
+z5|KgV6E45Uyl`S|<SVF(LUJ%f$fq^iFOLsn*$&gG2)Rm`_UNI=5`X^2G*_mQ{NO+5
+zSk0Ai1w=xAf(ORwg%?IF({@<O6j2qK*gybPX`R|PuAXNtS3!~_qQM}h?X=hdEXU>Q
+zOq6g)VQyuY0iV{hHyz}K5X*8LR&yod;Q%9%V7nQBkk7;Y^&J2dMW$i3#-+`Cg|%Fn
+zR5-x*zB$X?^&-ZB<=PLP`)*jb9BwbAdHv!!RQa?2ySc3bvm+5?Ng`9Mkr)i3TQ<u(
+z6@r?~RD2Ks$K4apaU7<S(e`0Z%xBN;lxbKFYq>JlFOEJ{C;(N0y1BRf?yluoNEgVI
+z4W?qDrchh?D!-ZEBvY&r@IHxELI`rDO7r<7Jbi|zgb*;lohLaMK$g3UD*>Me%W+5-
+zE8O2IG8qqZAvQqJ>jB_*4>SC3F~gUplYDt*gyexGElCpLfFH*>9P7H}xrk-EE{mB0
+z|GTio+~zKe8+)<nvk*cc3;4HNj{u2y$ctB105D9O8=tP@Qx(2*{Q~}d@gC#2E~To0
+z<=807-a9AZxrmi6)Cg)G-kv?j^_dZTUJuKee0#ShhUsu~VUtq5!Bi?tG~gqsNJtV?
+z42ysH)u&t@9p>s}>`><3uxv^-gMd#X=<~JMj>|I-@EiFWYq=t?Ur6!MN{%;YlDI;!
+zk|{Eo+zZ~1(M^k;N`q`k=gQa+K261TT;|hx!d@?tkjAa~ZN74OgaLnRF6Fv{V$Gmh
+zZ!i{X9rvU>Q_sp*4YrFl{%Aj-|Mw?r0LYR=G8$xkrwseM*@JYRJ8L=o9);H?V)(SZ
+zV~VQCZ0uAJ2!dXXue~~UNGQv3*(y{~6@~FW3B_rP)vz3DjVJlg>TZRXMx#g)$g;%j
+z$dhe7=+)3oi*!-vm-ja*RCV5%9w8C-A4*VT;UIpmh9XONJ*_dQR<~H)sWLp^BOLG^
+zT9&=gcd;sl$x61!PFZJuJ;#52yhgfEqguCc9J#r30lf9n2)b$G3Ru}GQFk0}&Zl|%
+z@(8XCOPONJ*Z_-L1@aaB(5~jVf{ooW<+{maJcM6s4f6e<uVO817I^oghq#VlYqx?x
+z!f^zdVvQgE&plq79B%2astUheNb|$@KEZJWSH|K*f*M|r!mE=BmeM6YdX&Z853Bdr
+z3vA_UeEr%4o5fP|($98X9%c$ef<97%hmT7AqHh6yWv5K0sB?WLi6lt~A$a%wdA{`W
+zBtN?K0K;_o{-0h$Z&*|flbuR~&1?~5g>QV}d~-Q%<aI`)ekz8^ujjUyN=7Kw8pw)7
+z*yrKWXcSqJ*esOsc|15k*=R5l4z_shY0ww34AbVpc7dzoaSn!vx@qB2Rep5y0l!+z
+z@~x}q(KHwd`xqGt6YwhNrbBYj-+X6fr^ZAqfFwz*WJ+kNLTV_8#9pfK7{?X-$A?S2
+zaVbe^Ac)dsV%rm<M;zA`zr4398kXH|YO;~5h`)R9uE>?^?I!X5;&#jPPu_pf@_gg=
+zy_RPogs3$vF~6A?pRDZ)y<xSRPmP`zce+qxbSR9rpG|k-+)#*E(93Tg=GsjpBLN&&
+zP&F*>tmc^CDDwWo7G<LWz+2Z|Y3ZLXRax69GaegYIx#@GZnoG@m3H-xgX;=$b8fS}
+zxg)0Sh#$Q7sW5G)t=$&y+}RR8|6oP@<v+YDOv@3L?TG*TbY0ZVC*Ep1j#$Z+#lvh~
+zxUMV2zE@{T)dQoQE<JgcX**2Bo?cO5zZx?U@l&ksc?|n!wuQ|Sx9+D&MFRZQpIyhJ
+z%BYIWOJl=ii!}gtt92H$C43&03$aKucakNEhHaypPjb1_q$ja-(?U19Uk2ANCRp9w
+z69AxY+JwC_-~ZN2WQsb|sl96!fN01^Q8&rgObWWiOni`J*ncR=9F2y#yOwEbJ1u$=
+z%d%Y@xBFdaIPB-|e|8(av3G+R@OtoQ8aM7PGm#u<xvFu5Agk+a70OJ<2ae30WJw|!
+z4)^_5v=g0Y&?T}Ybu0%9LGzq<kW5i$I1=P1w;mw`+?w0s;bxw1zd1{M(BCXV*pAD>
+zR)N>fCwX-&){-)GVst1-zG}2L_nn@^3I{Ywx=FTVP^_8cD|POz<@np5-ex&dXzxz8
+zSmVyp7WtaVKmOulQqd4!ePs-<M`62E#&TSCs|{{GSmR<U%23eTK14@UMaHYj%}oEa
+z=t(S1RrtbGoQhFrr_x}%SYx}a^X)gMc>C3f_U>GpN-!QB;LDd{*h1n$D%|v%)ZhS%
+z*$O4S&Q~s;M^n3>nj}f6s!Un0x10J(_cJ;Izos&sigGbEz;tR5O@XOIxV;<fXWdsX
+z#CUx=$>?yDzy9~z2qE?hs|E|%JQos!#}eu>k$|7&Y~fHnv7hwixC2nPY(99H=8a3E
+zc#a6h*^+_n2+j=!a9o#nK3E|V(g*}J;vpXnkPHX#@84Y=mqOJ*k_3@ppxx9LI{&H@
+zu$V4zWg>B;PylyVc6faKq{uRFy)wp!kFv~;L>Z5TnHV16_Ud-~Yh4o!`Egw5)MD4s
+zzw8*8wu3B7hi)tnA_Vv}57CehR|s+ygL@l0eD9lAo3{m$Br%g3!glvQD>?~&O~bNJ
+zCynTfShrWQoQsA&^ZIr<TgIoUsEW*TwnW8faD66qXvujLxnpU*Tf80*)y9)kLO<zQ
+ztdicKW?DppM^{er)jB`E^@uAI!`xcj#_N%pN<{E<C`&~GKGt`SuJk+&MV65Sm<P)H
+z{i3G;?+U?(%Nf2nkw7^jRvD(vd$*T)b9RhOS!XO7WGHmBumJh04w7If*!jDMZm8)x
+z!9afledk};C5CB}2nUW7%5eq%dSi}wB)~#C$19^lPZbJaC=?)H(|bw-0{$l_f_~AH
+zXDww)*pA@Rxk$T-e6`Nce!s|MBFcC?d}Qu*6xDhIR|vxXr;Gcn=<E_*vRl!a=<w0&
+zcER9petw6`<8i(?onW#<pQjP<Y7}+7z4^J)lV`2&RLE5frjvt6fZi}E84mCKewDv?
+zdxmq-y}R_2Qqm2CyZ80pi$G6e*^bL{rbNAA;kW|LBeRsL^7>4YRJ1?AHCwDQ81&-x
+zoNnc&8+sC}ordM`)88)e-LJmfZaOiJ>r$&X2nU|OclA}QkC(EXPlOrnV#hlUM#IFT
+zDySXuvS&$80luA&mbUS!5>5}tl}`A*+H)6*ev9?TFON|%>L^`&^7w~HUzg$MozJHW
+yoDyeZ9fLEmj=`B&$KXt?V{j(cF*p<J82mr^AI!`B(ontt0000<MNUMnLSTa9AfiqH
+
+literal 0
+HcmV?d00001
+
+diff --git a/public/firmas/sara-cofre.png b/public/firmas/sara-cofre.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..a031f5b60fd1a66c4a0a56752f7209a5f2bd57d7
+GIT binary patch
+literal 6182
+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
+Eg1gz|D*ylh
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/lib/generarExcelParteDiario.ts b/src/lib/generarExcelParteDiario.ts
+index c28eb01..c1303da 100644
+--- a/src/lib/generarExcelParteDiario.ts
++++ b/src/lib/generarExcelParteDiario.ts
+@@ -51,11 +51,16 @@ const N_ANCLAS_PLANTILLA_IMAGENES = 2
+ // note de verdad.
+ const RADIO_ESQUINA_FOTO = 32000 // 32% del lado más corto
+ 
+-function redondearEsquinasFotos(xmlDrawing: string): string {
++// numFotos acota el redondeo a las anclas que de verdad son fotos: las
++// primeras N_ANCLAS_PLANTILLA_IMAGENES son los logos (no se tocan) y todo
++// lo que venga después de "logos + fotos" son las firmas digitales que se
++// agregan más abajo (tampoco se tocan — sus esquinas deben quedar rectas).
++function redondearEsquinasFotos(xmlDrawing: string, numFotos: number): string {
+   let contador = 0
+   return xmlDrawing.replace(/<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g, (bloque) => {
+     contador += 1
+-    if (contador <= N_ANCLAS_PLANTILLA_IMAGENES) return bloque
++    const esFoto = contador > N_ANCLAS_PLANTILLA_IMAGENES && contador <= N_ANCLAS_PLANTILLA_IMAGENES + numFotos
++    if (!esFoto) return bloque
+     return bloque.replace(
+       '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
+       `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${RADIO_ESQUINA_FOTO}"/></a:avLst></a:prstGeom>`
+@@ -63,7 +68,102 @@ function redondearEsquinasFotos(xmlDrawing: string): string {
+   })
+ }
+ 
+-async function posprocesarExcel(bufferGenerado: ArrayBuffer, bufferPlantilla: ArrayBuffer): Promise<Blob> {
++// ---------- Firmas digitales (hojas "DR" e "Imágenes") ----------
++// El bloque de firma de la plantilla (fila "Firma", justo debajo de
++// "Nombre:") es igual en las dos hojas — la hoja "Imágenes" lo repite 4
++// filas más arriba que la hoja "DR". "Coordinador de Terreno" y
++// "Administrador Contrato" ya vienen con nombre fijo en la plantilla
++// (Ericson Ramirez / Sara Cofré); "Responsable Mandante" queda en blanco
++// porque lo firma el mandante por su cuenta, no acá.
++//
++// La hoja "DR" restaura su drawing completo desde la plantilla (ver
++// PARTES_GRAFICO, por el gráfico) — insertar ahí una imagen con la API de
++// ExcelJS (workbook.addImage) se perdería en esa restauración. Por eso las
++// dos firmas se inyectan directamente en el XML del drawing de cada hoja,
++// con el mismo mecanismo que ya se usa para el gráfico y las esquinas
++// redondeadas, en vez de con addImage.
++const FIRMA_ERICSON_URL = '/firmas/ericson-ramirez.png'
++const FIRMA_SARA_URL = '/firmas/sara-cofre.png'
++const FIRMA_ERICSON_MEDIA = 'firma-ericson-ramirez.png'
++const FIRMA_SARA_MEDIA = 'firma-sara-cofre.png'
++
++// Fila (índice 0 de OOXML, o sea fila de Excel menos 1) de la etiqueta
++// "Firma" en cada hoja.
++const FILA_FIRMA_DR = 94 // fila 95 en Excel
++const FILA_FIRMA_IMAGENES = 90 // fila 91 en Excel
++
++// Recuadro de cada firma dentro de UNA sola columna (para no invadir la
++// celda de al lado ni la de "Firma"/"Nombre" de al lado), en EMU (914400
++// EMU = 1 pulgada). Calculado a mano a partir del ancho real de columna
++// C/G y el alto de la fila "Firma" en la plantilla (33.6pt ≈ 426720 EMU),
++// para centrar la firma verticalmente y mantener su proporción original
++// (a diferencia de las fotos, acá no conviene estirarla).
++interface CajaFirma {
++  col: number
++  colOffIni: number
++  colOffFin: number
++  rowOffIni: number
++  rowOffFin: number
++}
++// Columna C (bajo "Firma" del Coordinador de Terreno / Ericson Ramirez).
++const CAJA_FIRMA_ERICSON: CajaFirma = { col: 2, colOffIni: 30000, colOffFin: 417931, rowOffIni: 63360, rowOffFin: 363360 }
++// Columna G (bajo "Firma" del Administrador Contrato / Sara Cofré).
++const CAJA_FIRMA_SARA: CajaFirma = { col: 6, colOffIni: 30000, colOffFin: 433846, rowOffIni: 63360, rowOffFin: 363360 }
++
++function xmlAnclaFirma(caja: CajaFirma, fila: number, picId: number, nombre: string, rId: string): string {
++  return (
++    '<xdr:twoCellAnchor editAs="oneCell">' +
++    `<xdr:from><xdr:col>${caja.col}</xdr:col><xdr:colOff>${caja.colOffIni}</xdr:colOff><xdr:row>${fila}</xdr:row><xdr:rowOff>${caja.rowOffIni}</xdr:rowOff></xdr:from>` +
++    `<xdr:to><xdr:col>${caja.col}</xdr:col><xdr:colOff>${caja.colOffFin}</xdr:colOff><xdr:row>${fila}</xdr:row><xdr:rowOff>${caja.rowOffFin}</xdr:rowOff></xdr:to>` +
++    '<xdr:pic><xdr:nvPicPr>' +
++    `<xdr:cNvPr id="${picId}" name="${nombre}"/>` +
++    '<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
++    `<xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
++    '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
++    '</xdr:pic><xdr:clientData/></xdr:twoCellAnchor>'
++  )
++}
++
++// Siguiente rId / cNvPr id libre en un drawing/rels ya existente, para no
++// chocar con los que ExcelJS (fotos) o la plantilla (logos, gráfico) ya
++// hayan usado — el conteo real varía según cuántas fotos tenga el reporte,
++// así que no se puede asumir un número fijo.
++function siguienteId(xml: string, patron: RegExp): number {
++  let max = 0
++  for (const m of xml.matchAll(patron)) {
++    const n = Number(m[1])
++    if (n > max) max = n
++  }
++  return max + 1
++}
++
++function agregarFirmasAlDrawing(xmlDrawing: string, xmlRels: string, fila: number): { drawing: string; rels: string } {
++  const rIdInicial = siguienteId(xmlRels, /Id="rId(\d+)"/g)
++  const rIdEricson = `rId${rIdInicial}`
++  const rIdSara = `rId${rIdInicial + 1}`
++
++  const idInicial = siguienteId(xmlDrawing, /<xdr:cNvPr id="(\d+)"/g)
++
++  const anclas =
++    xmlAnclaFirma(CAJA_FIRMA_ERICSON, fila, idInicial, 'Firma Ericson Ramirez', rIdEricson) +
++    xmlAnclaFirma(CAJA_FIRMA_SARA, fila, idInicial + 1, 'Firma Sara Cofré', rIdSara)
++  const drawing = xmlDrawing.replace('</xdr:wsDr>', `${anclas}</xdr:wsDr>`)
++
++  const nuevasRelaciones =
++    `<Relationship Id="${rIdEricson}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${FIRMA_ERICSON_MEDIA}"/>` +
++    `<Relationship Id="${rIdSara}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${FIRMA_SARA_MEDIA}"/>`
++  const rels = xmlRels.replace('</Relationships>', `${nuevasRelaciones}</Relationships>`)
++
++  return { drawing, rels }
++}
++
++async function posprocesarExcel(
++  bufferGenerado: ArrayBuffer,
++  bufferPlantilla: ArrayBuffer,
++  numFotosInsertadas: number,
++  firmaEricsonBuffer: ArrayBuffer,
++  firmaSaraBuffer: ArrayBuffer
++): Promise<Blob> {
+   const [zipGenerado, zipPlantilla] = await Promise.all([JSZip.loadAsync(bufferGenerado), JSZip.loadAsync(bufferPlantilla)])
+ 
+   // ---- 1. Restaurar el gráfico "Programado vs. Real" (hoja DR) ----
+@@ -86,7 +186,30 @@ async function posprocesarExcel(bufferGenerado: ArrayBuffer, bufferPlantilla: Ar
+   // ---- 2. Esquinas redondeadas en las fotos (hoja Imágenes) ----
+   const drawing2Path = 'xl/drawings/drawing2.xml'
+   const drawing2 = await zipGenerado.file(drawing2Path)?.async('string')
+-  if (drawing2) zipGenerado.file(drawing2Path, redondearEsquinasFotos(drawing2))
++  if (drawing2) zipGenerado.file(drawing2Path, redondearEsquinasFotos(drawing2, numFotosInsertadas))
++
++  // ---- 3. Firmas digitales (hojas DR e Imágenes) ----
++  zipGenerado.file(`xl/media/${FIRMA_ERICSON_MEDIA}`, new Uint8Array(firmaEricsonBuffer))
++  zipGenerado.file(`xl/media/${FIRMA_SARA_MEDIA}`, new Uint8Array(firmaSaraBuffer))
++
++  const drawing1Path = 'xl/drawings/drawing1.xml'
++  const drawing1RelsPath = 'xl/drawings/_rels/drawing1.xml.rels'
++  const drawing1 = await zipGenerado.file(drawing1Path)?.async('string')
++  const drawing1Rels = await zipGenerado.file(drawing1RelsPath)?.async('string')
++  if (drawing1 && drawing1Rels) {
++    const { drawing, rels } = agregarFirmasAlDrawing(drawing1, drawing1Rels, FILA_FIRMA_DR)
++    zipGenerado.file(drawing1Path, drawing)
++    zipGenerado.file(drawing1RelsPath, rels)
++  }
++
++  const drawing2RelsPath = 'xl/drawings/_rels/drawing2.xml.rels'
++  const drawing2ConEsquinas = await zipGenerado.file(drawing2Path)?.async('string')
++  const drawing2Rels = await zipGenerado.file(drawing2RelsPath)?.async('string')
++  if (drawing2ConEsquinas && drawing2Rels) {
++    const { drawing, rels } = agregarFirmasAlDrawing(drawing2ConEsquinas, drawing2Rels, FILA_FIRMA_IMAGENES)
++    zipGenerado.file(drawing2Path, drawing)
++    zipGenerado.file(drawing2RelsPath, rels)
++  }
+ 
+   return zipGenerado.generateAsync({ type: 'blob' })
+ }
+@@ -247,6 +370,11 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+   // después, en posprocesarExcel(), porque ExcelJS no expone esa opción
+   // en su API de addImage.
+   const fotosValidas = parte.fotos.slice(0, GRILLA_COLUMNAS * 20) // límite defensivo, no debería alcanzarse en uso normal
++  // No siempre coincide con fotosValidas.length: si alguna foto falla al
++  // descargarse (catch más abajo) se salta y no se inserta ningún ancla
++  // para ella — hay que contar solo las que de verdad se insertaron, para
++  // que el redondeo de esquinas en posprocesarExcel() no se desalinee.
++  let fotosInsertadas = 0
+   for (let i = 0; i < fotosValidas.length; i++) {
+     const foto = fotosValidas[i]
+     try {
+@@ -257,7 +385,7 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+       const extension = urlSinQuery.endsWith('.png') ? 'png' : 'jpeg'
+       const imageId = workbook.addImage({ buffer: bufferFoto as any, extension })
+ 
+-      const celda = calcularCeldaFoto(i)
++      const celda = calcularCeldaFoto(fotosInsertadas)
+       // Los tipos de ExcelJS piden una instancia completa de su clase Anchor
+       // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
+       // objetos planos {col, row} sin problema — es un typing de ExcelJS
+@@ -267,13 +395,25 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+       if (foto.caption) {
+         hojaImagenes.getRow(celda.filaLeyenda + 1).getCell(celda.colLeyenda + 1).value = foto.caption
+       }
++      fotosInsertadas += 1
+     } catch (err) {
+       console.error('No se pudo insertar una foto en el Excel:', err)
+     }
+   }
+ 
++  // ---------- Firmas digitales (Coordinador de Terreno / Administrador
++  // Contrato) — se insertan en posprocesarExcel(), ver comentario ahí.
++  const [respFirmaEricson, respFirmaSara] = await Promise.all([fetch(FIRMA_ERICSON_URL), fetch(FIRMA_SARA_URL)])
++  if (!respFirmaEricson.ok || !respFirmaSara.ok) {
++    throw new Error('No se pudieron cargar las imágenes de firma')
++  }
++  const [firmaEricsonBuffer, firmaSaraBuffer] = await Promise.all([
++    respFirmaEricson.arrayBuffer(),
++    respFirmaSara.arrayBuffer(),
++  ])
++
+   const bufferGenerado = await workbook.xlsx.writeBuffer()
+-  return posprocesarExcel(bufferGenerado, buffer)
++  return posprocesarExcel(bufferGenerado, buffer, fotosInsertadas, firmaEricsonBuffer, firmaSaraBuffer)
+ }
+ 
+ export function nombreArchivoParteDiario(parte: ParteDiario): string {
+-- 
+2.43.0
+

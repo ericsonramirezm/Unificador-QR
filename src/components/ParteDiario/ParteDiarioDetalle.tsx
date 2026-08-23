@@ -2,17 +2,21 @@ import { useEffect, useState } from 'react'
 import { db } from '@lib/supabase'
 import { ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
 import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
+import { puedeEditar, puedeEliminar } from './permisos'
 
 interface ParteDiarioDetalleProps {
   usuario: Usuario
   parteId: string
   onVolver: () => void
+  // Opcional porque no todos los que muestran este detalle necesariamente
+  // ofrecen edición (por ahora ParteDiarioList siempre la pasa).
+  onEditar?: (parte: ParteDiario) => void
 }
 
 const sumarHoras = (items: any[], campo: string) =>
   items.reduce((acc, item) => acc + (Array.isArray(item[campo]) ? item[campo].reduce((a: number, h: number) => a + (h || 0), 0) : 0), 0)
 
-export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDetalleProps) => {
+export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: ParteDiarioDetalleProps) => {
   const [parte, setParte] = useState<ParteDiario | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -22,6 +26,7 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
   const [isComentando, setIsComentando] = useState(false)
 
   const [isGenerandoExcel, setIsGenerandoExcel] = useState(false)
+  const [isEliminando, setIsEliminando] = useState(false)
 
   const cargar = async () => {
     setIsLoading(true)
@@ -70,6 +75,22 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
     }
   }
 
+  const eliminar = async () => {
+    if (!parte) return
+    if (!window.confirm(`¿Eliminar el Daily Report N° ${String(parte.numero_reporte).padStart(3, '0')}? Esta acción no se puede deshacer.`)) {
+      return
+    }
+    setIsEliminando(true)
+    setError(null)
+    try {
+      await db.eliminarParteDiario(parte.id)
+      onVolver()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar el Daily Report')
+      setIsEliminando(false)
+    }
+  }
+
   if (isLoading) return <div className="bg-white rounded-lg border border-slate-200 p-6 text-sm text-slate-500">Cargando…</div>
   if (!parte) return <div className="bg-white rounded-lg border border-slate-200 p-6 text-sm text-red-600">{error ?? 'No encontrado'}</div>
 
@@ -99,6 +120,23 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
           </div>
           <div className="flex items-center gap-3">
             <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{parte.estado}</span>
+            {onEditar && puedeEditar(usuario, parte) && (
+              <button
+                onClick={() => onEditar(parte)}
+                className="px-3 py-1.5 border border-blue-200 text-blue-600 text-sm font-semibold rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                ✎ Editar
+              </button>
+            )}
+            {puedeEliminar(usuario) && (
+              <button
+                onClick={eliminar}
+                disabled={isEliminando}
+                className="px-3 py-1.5 border border-red-200 text-red-600 text-sm font-semibold rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isEliminando ? 'Eliminando…' : '🗑 Eliminar'}
+              </button>
+            )}
             <button
               onClick={descargarExcel}
               disabled={isGenerandoExcel}

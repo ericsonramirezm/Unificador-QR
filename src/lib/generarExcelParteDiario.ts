@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
-import { ParteDiario } from '@/types/index'
+import { ParteDiario, UserRole } from '@/types/index'
 
 // Genera el Daily Report en Excel EXACTAMENTE con el formato original: se
 // abre la plantilla en blanco (public/plantillas/DR000_12501191.xlsx, la
@@ -31,9 +31,169 @@ const PARTES_GRAFICO = [
   'xl/drawings/_rels/drawing1.xml.rels',
 ]
 
-async function restaurarGraficoOriginal(bufferGenerado: ArrayBuffer, bufferPlantilla: ArrayBuffer): Promise<Blob> {
+// Cuántas anclas de imagen (xdr:oneCellAnchor / xdr:twoCellAnchor) trae la
+// hoja "Imágenes" de la PLANTILLA en blanco, antes de que nuestro código
+// agregue ninguna foto: los 2 logos del encabezado. ExcelJS conserva esas
+// anclas tal cual y solo AGREGA anclas nuevas al final por cada
+// hojaImagenes.addImage() que hacemos — por eso, en el XML ya generado,
+// las primeras N_ANCLAS_PLANTILLA anclas son siempre esos logos y el resto
+// son las fotos del reporte, sin importar si terminamos usando
+// oneCellAnchor o twoCellAnchor para insertarlas.
+const N_ANCLAS_PLANTILLA_IMAGENES = 2
+
+// Redondea las esquinas de las fotos insertadas (no las del logo): ExcelJS
+// no tiene forma de pedir esto por API, así que se edita el XML del dibujo
+// directamente después de generarlo (mismo mecanismo que restaurarGraficoOriginal
+// usa para el gráfico). El radio es un % (sobre 50000 = 50%) del lado más
+// corto del recuadro. Se probó primero en 32000 (32%) pero en fotos
+// grandes como estas se veía como una esquina cortada en diagonal, muy
+// exagerado — 3000 (3%) da un redondeo sutil, apenas perceptible pero
+// presente.
+const RADIO_ESQUINA_FOTO = 3000 // 3% del lado más corto
+
+// numFotos acota el redondeo a las anclas que de verdad son fotos: las
+// primeras N_ANCLAS_PLANTILLA_IMAGENES son los logos (no se tocan) y todo
+// lo que venga después de "logos + fotos" son las firmas digitales que se
+// agregan más abajo (tampoco se tocan — sus esquinas deben quedar rectas).
+function redondearEsquinasFotos(xmlDrawing: string, numFotos: number): string {
+  let contador = 0
+  return xmlDrawing.replace(/<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g, (bloque) => {
+    contador += 1
+    const esFoto = contador > N_ANCLAS_PLANTILLA_IMAGENES && contador <= N_ANCLAS_PLANTILLA_IMAGENES + numFotos
+    if (!esFoto) return bloque
+    return bloque.replace(
+      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
+      `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${RADIO_ESQUINA_FOTO}"/></a:avLst></a:prstGeom>`
+    )
+  })
+}
+
+// ---------- Firmas digitales (hojas "DR" e "Imágenes") ----------
+// El bloque de firma de la plantilla (fila "Firma", justo debajo de
+// "Nombre:") es igual en las dos hojas — la hoja "Imágenes" lo repite 4
+// filas más arriba que la hoja "DR".
+//
+// "Coordinador de Terreno" es dinámico: se usa el nombre y la firma_url
+// de quien creó el reporte (parte.usuario_creador), SOLO si ese usuario
+// tiene rol coordinador — así cada coordinador firma con su propio
+// nombre e imagen al generar el Excel, en vez del nombre fijo que traía
+// la plantilla (antes siempre decía "Ericson Ramirez", venía escrito en
+// el archivo de la plantilla, no lo ponía el código). Si el reporte lo
+// creó un apr, o el coordinador todavía no tiene firma_url cargada en la
+// tabla usuarios (ver add_firma_usuarios.sql), esa celda queda en blanco
+// y no se inserta imagen — mejor eso que atribuirle mal una firma.
+//
+// "Administrador Contrato" (Sara Cofré) sigue fija por ahora — no se
+// pidió que varíe por usuario. "Responsable Mandante" queda en blanco
+// porque lo firma el mandante por su cuenta, no acá.
+//
+// La hoja "DR" restaura su drawing completo desde la plantilla (ver
+// PARTES_GRAFICO, por el gráfico) — insertar ahí una imagen con la API de
+// ExcelJS (workbook.addImage) se perdería en esa restauración. Por eso las
+// firmas se inyectan directamente en el XML del drawing de cada hoja, con
+// el mismo mecanismo que ya se usa para el gráfico y las esquinas
+// redondeadas, en vez de con addImage.
+const FIRMA_SARA_URL = '/firmas/sara-cofre.png'
+const FIRMA_SARA_MEDIA = 'firma-sara-cofre.png'
+const FIRMA_COORDINADOR_MEDIA = 'firma-coordinador.png'
+
+// Celda con el nombre del Coordinador de Terreno en la hoja "DR" — la
+// hoja "Imágenes" no necesita que la toquemos: su celda equivalente
+// (C90) ya es la fórmula "=+DR!C94" en la plantilla, así que sigue a
+// esta automáticamente al recalcular.
+const CELDA_NOMBRE_COORDINADOR = 'C94'
+
+// Fila (índice 0 de OOXML, o sea fila de Excel menos 1) de la etiqueta
+// "Firma" en cada hoja.
+const FILA_FIRMA_DR = 94 // fila 95 en Excel
+const FILA_FIRMA_IMAGENES = 90 // fila 91 en Excel
+
+// Recuadro de cada firma dentro de UNA sola columna (para no invadir la
+// celda de al lado ni la de "Firma"/"Nombre" de al lado), en EMU (914400
+// EMU = 1 pulgada). Calculado a mano a partir del ancho real de columna
+// C/G y el alto de la fila "Firma" en la plantilla (33.6pt ≈ 426720 EMU),
+// para centrar la firma verticalmente y mantener su proporción original
+// (a diferencia de las fotos, acá no conviene estirarla).
+interface CajaFirma {
+  col: number
+  colOffIni: number
+  colOffFin: number
+  rowOffIni: number
+  rowOffFin: number
+}
+// Columna C (bajo "Firma" del Coordinador de Terreno).
+const CAJA_FIRMA_COORDINADOR: CajaFirma = { col: 2, colOffIni: 30000, colOffFin: 417931, rowOffIni: 63360, rowOffFin: 363360 }
+// Columna G (bajo "Firma" del Administrador Contrato / Sara Cofré).
+const CAJA_FIRMA_SARA: CajaFirma = { col: 6, colOffIni: 30000, colOffFin: 433846, rowOffIni: 63360, rowOffFin: 363360 }
+
+interface FirmaAInsertar {
+  caja: CajaFirma
+  nombre: string // solo para el name= del shape, no se muestra en pantalla
+  mediaFileName: string
+  buffer: ArrayBuffer
+}
+
+function xmlAnclaFirma(caja: CajaFirma, fila: number, picId: number, nombre: string, rId: string): string {
+  return (
+    '<xdr:twoCellAnchor editAs="oneCell">' +
+    `<xdr:from><xdr:col>${caja.col}</xdr:col><xdr:colOff>${caja.colOffIni}</xdr:colOff><xdr:row>${fila}</xdr:row><xdr:rowOff>${caja.rowOffIni}</xdr:rowOff></xdr:from>` +
+    `<xdr:to><xdr:col>${caja.col}</xdr:col><xdr:colOff>${caja.colOffFin}</xdr:colOff><xdr:row>${fila}</xdr:row><xdr:rowOff>${caja.rowOffFin}</xdr:rowOff></xdr:to>` +
+    '<xdr:pic><xdr:nvPicPr>' +
+    `<xdr:cNvPr id="${picId}" name="${nombre}"/>` +
+    '<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
+    `<xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
+    '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
+    '</xdr:pic><xdr:clientData/></xdr:twoCellAnchor>'
+  )
+}
+
+// Siguiente rId / cNvPr id libre en un drawing/rels ya existente, para no
+// chocar con los que ExcelJS (fotos) o la plantilla (logos, gráfico) ya
+// hayan usado — el conteo real varía según cuántas fotos tenga el reporte,
+// así que no se puede asumir un número fijo.
+function siguienteId(xml: string, patron: RegExp): number {
+  let max = 0
+  for (const m of xml.matchAll(patron)) {
+    const n = Number(m[1])
+    if (n > max) max = n
+  }
+  return max + 1
+}
+
+// firmas puede traer 1 o 2 elementos: Sara siempre, más el Coordinador
+// solo si el reporte tiene un creador coordinador con firma_url cargada
+// (ver generarExcelParteDiario). Si viene vacío no se toca el drawing.
+function agregarFirmasAlDrawing(xmlDrawing: string, xmlRels: string, fila: number, firmas: FirmaAInsertar[]): { drawing: string; rels: string; media: { nombre: string; buffer: ArrayBuffer }[] } {
+  if (firmas.length === 0) return { drawing: xmlDrawing, rels: xmlRels, media: [] }
+
+  let rIdSiguiente = siguienteId(xmlRels, /Id="rId(\d+)"/g)
+  let idSiguiente = siguienteId(xmlDrawing, /<xdr:cNvPr id="(\d+)"/g)
+
+  let anclas = ''
+  let nuevasRelaciones = ''
+  const media: { nombre: string; buffer: ArrayBuffer }[] = []
+  for (const firma of firmas) {
+    const rId = `rId${rIdSiguiente++}`
+    anclas += xmlAnclaFirma(firma.caja, fila, idSiguiente++, firma.nombre, rId)
+    nuevasRelaciones += `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${firma.mediaFileName}"/>`
+    media.push({ nombre: firma.mediaFileName, buffer: firma.buffer })
+  }
+
+  const drawing = xmlDrawing.replace('</xdr:wsDr>', `${anclas}</xdr:wsDr>`)
+  const rels = xmlRels.replace('</Relationships>', `${nuevasRelaciones}</Relationships>`)
+  return { drawing, rels, media }
+}
+
+async function posprocesarExcel(
+  bufferGenerado: ArrayBuffer,
+  bufferPlantilla: ArrayBuffer,
+  numFotosInsertadas: number,
+  firmaSaraBuffer: ArrayBuffer,
+  firmaCoordinadorBuffer: ArrayBuffer | null
+): Promise<Blob> {
   const [zipGenerado, zipPlantilla] = await Promise.all([JSZip.loadAsync(bufferGenerado), JSZip.loadAsync(bufferPlantilla)])
 
+  // ---- 1. Restaurar el gráfico "Programado vs. Real" (hoja DR) ----
   for (const parte of PARTES_GRAFICO) {
     const original = zipPlantilla.file(parte)
     if (original) zipGenerado.file(parte, await original.async('uint8array'))
@@ -50,8 +210,49 @@ async function restaurarGraficoOriginal(bufferGenerado: ArrayBuffer, bufferPlant
     zipGenerado.file(contentTypesPath, contentTypes.replace('</Types>', `${override}</Types>`))
   }
 
-  const bufferFinal = await zipGenerado.generateAsync({ type: 'blob' })
-  return bufferFinal
+  // ---- 2. Esquinas redondeadas en las fotos (hoja Imágenes) ----
+  const drawing2Path = 'xl/drawings/drawing2.xml'
+  const drawing2 = await zipGenerado.file(drawing2Path)?.async('string')
+  if (drawing2) zipGenerado.file(drawing2Path, redondearEsquinasFotos(drawing2, numFotosInsertadas))
+
+  // ---- 3. Firmas digitales (hojas DR e Imágenes) ----
+  const firmasParaCaja = (cajaCoordinador: CajaFirma, cajaSara: CajaFirma): FirmaAInsertar[] => {
+    const firmas: FirmaAInsertar[] = [
+      { caja: cajaSara, nombre: 'Firma Administrador Contrato', mediaFileName: FIRMA_SARA_MEDIA, buffer: firmaSaraBuffer },
+    ]
+    if (firmaCoordinadorBuffer) {
+      firmas.push({
+        caja: cajaCoordinador,
+        nombre: 'Firma Coordinador de Terreno',
+        mediaFileName: FIRMA_COORDINADOR_MEDIA,
+        buffer: firmaCoordinadorBuffer,
+      })
+    }
+    return firmas
+  }
+
+  const drawing1Path = 'xl/drawings/drawing1.xml'
+  const drawing1RelsPath = 'xl/drawings/_rels/drawing1.xml.rels'
+  const drawing1 = await zipGenerado.file(drawing1Path)?.async('string')
+  const drawing1Rels = await zipGenerado.file(drawing1RelsPath)?.async('string')
+  if (drawing1 && drawing1Rels) {
+    const { drawing, rels, media } = agregarFirmasAlDrawing(drawing1, drawing1Rels, FILA_FIRMA_DR, firmasParaCaja(CAJA_FIRMA_COORDINADOR, CAJA_FIRMA_SARA))
+    zipGenerado.file(drawing1Path, drawing)
+    zipGenerado.file(drawing1RelsPath, rels)
+    for (const m of media) zipGenerado.file(`xl/media/${m.nombre}`, new Uint8Array(m.buffer))
+  }
+
+  const drawing2RelsPath = 'xl/drawings/_rels/drawing2.xml.rels'
+  const drawing2ConEsquinas = await zipGenerado.file(drawing2Path)?.async('string')
+  const drawing2Rels = await zipGenerado.file(drawing2RelsPath)?.async('string')
+  if (drawing2ConEsquinas && drawing2Rels) {
+    const { drawing, rels, media } = agregarFirmasAlDrawing(drawing2ConEsquinas, drawing2Rels, FILA_FIRMA_IMAGENES, firmasParaCaja(CAJA_FIRMA_COORDINADOR, CAJA_FIRMA_SARA))
+    zipGenerado.file(drawing2Path, drawing)
+    zipGenerado.file(drawing2RelsPath, rels)
+    for (const m of media) zipGenerado.file(`xl/media/${m.nombre}`, new Uint8Array(m.buffer))
+  }
+
+  return zipGenerado.generateAsync({ type: 'blob' })
 }
 
 // Filas fijas en la hoja "DR", en el mismo orden que CARGOS_DIRECTOS /
@@ -70,6 +271,52 @@ function horaATiempoExcel(hora: string | null | undefined): Date | null {
   const [h, m] = hora.split(':').map(Number)
   if (Number.isNaN(h) || Number.isNaN(m)) return null
   return new Date(Date.UTC(1899, 11, 30, h, m))
+}
+
+// ---------- Grilla de fotos (hoja "Imágenes") ----------
+// Grilla de 3 columnas, distribuida simétricamente dentro del rango B7:N88
+// (columnas 1 a 13 y desde la fila 7 en índice 0, que es como ExcelJS
+// cuenta col/row). La altura de cada fila de la grilla es fija (pensada
+// para que 3 filas — 9 fotos — llenen justo hasta la fila 88, como en el
+// diseño de referencia); si hay más de 9 fotos, la grilla sigue agregando
+// filas hacia abajo en vez de achicar las tarjetas para que "quepan
+// igual" — con pocas fotos (1 o 2) se ven del mismo tamaño natural que
+// con 9, no gigantes estiradas ocupando toda la hoja. Cada foto usa un
+// twoCellAnchor (con coordenadas fraccionarias tipo "col: 1.15") en vez
+// de un tamaño fijo en píxeles, para que el recuadro se ajuste al ancho
+// real de las columnas — igual a como queda al insertar imágenes a mano
+// en Excel arrastrándolas dentro de un rango de celdas.
+const GRILLA_COL_INICIO = 1 // columna B
+const GRILLA_COL_FIN = 13 // columna N
+const GRILLA_FILA_INICIO = 7 // fila 8 (deja la fila 7 como encabezado de la sección)
+const GRILLA_COLUMNAS = 3
+const GRILLA_ALTURA_BANDA = 26 // alto fijo de cada fila de la grilla — 3 filas ≈ hasta la fila 88
+const GRILLA_MARGEN = 0.15 // espacio entre tarjetas, en unidades de celda
+const GRILLA_ALTURA_LEYENDA = 2.2 // filas reservadas bajo la foto para el pie de foto
+
+function calcularCeldaFoto(index: number) {
+  const col = index % GRILLA_COLUMNAS
+  const fila = Math.floor(index / GRILLA_COLUMNAS)
+
+  const anchoColumna = (GRILLA_COL_FIN - GRILLA_COL_INICIO) / GRILLA_COLUMNAS
+
+  const tlCol = GRILLA_COL_INICIO + col * anchoColumna + GRILLA_MARGEN
+  const brCol = GRILLA_COL_INICIO + (col + 1) * anchoColumna - GRILLA_MARGEN
+  const tlRow = GRILLA_FILA_INICIO + fila * GRILLA_ALTURA_BANDA + GRILLA_MARGEN
+  const brRowFoto = GRILLA_FILA_INICIO + (fila + 1) * GRILLA_ALTURA_BANDA - GRILLA_MARGEN - GRILLA_ALTURA_LEYENDA
+
+  // Fila (índice 0) donde va el pie de foto: la primera fila completa
+  // después del recuadro de la foto, pero antes de que empiece la fila
+  // siguiente de la grilla (que ya arranca a los GRILLA_MARGEN de acá) —
+  // si no, la foto de abajo tapa visualmente el texto del pie de foto.
+  const filaLeyenda = Math.ceil(brRowFoto)
+
+  return {
+    tl: { col: tlCol, row: tlRow },
+    br: { col: brCol, row: brRowFoto },
+    filaLeyenda,
+    colLeyenda: Math.floor(tlCol),
+  }
 }
 
 export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob> {
@@ -158,12 +405,29 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   if (parte.comentario_mandante_autor) hojaDR.getCell('B88').value = parte.comentario_mandante_autor
   if (parte.comentario_mandante) hojaDR.getCell('D88').value = parte.comentario_mandante
 
+  // ---------- Coordinador de Terreno (nombre) ----------
+  // La plantilla trae "Ericson Ramirez" fijo en esta celda; se sobrescribe
+  // acá con quien de verdad creó el reporte, SI es coordinador — si lo
+  // creó un apr, se deja en blanco (nadie ha firmado como coordinador
+  // todavía). La firma (imagen) se resuelve más abajo junto con la de
+  // Sara Cofré, y se inserta en posprocesarExcel().
+  const creador = parte.usuario_creador
+  const creadorEsCoordinador = creador?.rol === UserRole.COORDINADOR
+  hojaDR.getCell(CELDA_NOMBRE_COORDINADOR).value = creadorEsCoordinador ? creador!.nombre : ''
+
   // ---------- Fotos (hoja "Imágenes") ----------
-  // Grilla simple, una foto por bloque de filas — no reproduce un layout
-  // manual, solo deja las fotos del día insertadas y legibles con su pie
-  // de foto. Se puede refinar el layout más adelante.
-  let filaFoto = 8
-  for (const foto of parte.fotos) {
+  // Grilla de 3 columnas repartida simétricamente en B7:N88 — ver
+  // calcularCeldaFoto() más arriba. Las esquinas redondeadas se agregan
+  // después, en posprocesarExcel(), porque ExcelJS no expone esa opción
+  // en su API de addImage.
+  const fotosValidas = parte.fotos.slice(0, GRILLA_COLUMNAS * 20) // límite defensivo, no debería alcanzarse en uso normal
+  // No siempre coincide con fotosValidas.length: si alguna foto falla al
+  // descargarse (catch más abajo) se salta y no se inserta ningún ancla
+  // para ella — hay que contar solo las que de verdad se insertaron, para
+  // que el redondeo de esquinas en posprocesarExcel() no se desalinee.
+  let fotosInsertadas = 0
+  for (let i = 0; i < fotosValidas.length; i++) {
+    const foto = fotosValidas[i]
     try {
       const respFoto = await fetch(foto.url)
       if (!respFoto.ok) continue
@@ -172,23 +436,43 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
       const extension = urlSinQuery.endsWith('.png') ? 'png' : 'jpeg'
       const imageId = workbook.addImage({ buffer: bufferFoto as any, extension })
 
-      hojaImagenes.addImage(imageId, {
-        tl: { col: 1, row: filaFoto - 1 },
-        ext: { width: 320, height: 220 },
-      })
+      const celda = calcularCeldaFoto(fotosInsertadas)
+      // Los tipos de ExcelJS piden una instancia completa de su clase Anchor
+      // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
+      // objetos planos {col, row} sin problema — es un typing de ExcelJS
+      // más estricto que su propio comportamiento real.
+      hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br } as any)
 
       if (foto.caption) {
-        hojaImagenes.getCell(`B${filaFoto + 11}`).value = foto.caption
+        hojaImagenes.getRow(celda.filaLeyenda + 1).getCell(celda.colLeyenda + 1).value = foto.caption
       }
+      fotosInsertadas += 1
     } catch (err) {
       console.error('No se pudo insertar una foto en el Excel:', err)
-    } finally {
-      filaFoto += 13
+    }
+  }
+
+  // ---------- Firmas digitales (Administrador Contrato / Coordinador de
+  // Terreno) — se insertan en posprocesarExcel(), ver comentario ahí. La
+  // de Sara Cofré (Administrador Contrato) es fija y siempre se agrega; la
+  // del Coordinador de Terreno depende de si el creador del reporte es
+  // coordinador y ya tiene firma_url cargada (ver arriba).
+  const respFirmaSara = await fetch(FIRMA_SARA_URL)
+  if (!respFirmaSara.ok) throw new Error('No se pudo cargar la imagen de firma de Administrador Contrato')
+  const firmaSaraBuffer = await respFirmaSara.arrayBuffer()
+
+  let firmaCoordinadorBuffer: ArrayBuffer | null = null
+  if (creadorEsCoordinador && creador?.firma_url) {
+    const respFirmaCoordinador = await fetch(creador.firma_url)
+    if (respFirmaCoordinador.ok) {
+      firmaCoordinadorBuffer = await respFirmaCoordinador.arrayBuffer()
+    } else {
+      console.error('No se pudo cargar la imagen de firma del coordinador:', creador.firma_url)
     }
   }
 
   const bufferGenerado = await workbook.xlsx.writeBuffer()
-  return restaurarGraficoOriginal(bufferGenerado, buffer)
+  return posprocesarExcel(bufferGenerado, buffer, fotosInsertadas, firmaSaraBuffer, firmaCoordinadorBuffer)
 }
 
 export function nombreArchivoParteDiario(parte: ParteDiario): string {

@@ -5,6 +5,7 @@ import {
   CARGOS_DIRECTOS,
   CARGOS_INDIRECTOS,
   EQUIPOS_MAQUINARIA,
+  ParteDiario,
   ParteDiarioEstado,
   Usuario,
 } from '@/types/index'
@@ -13,6 +14,10 @@ import { FotoPendiente, GestorFotos } from './GestorFotos'
 interface ParteDiarioFormProps {
   usuario: Usuario
   contrato: any
+  // Si viene seteado, el formulario entra en modo edición: hidrata todos
+  // los campos desde este Daily Report existente en vez de partir vacío, y
+  // guardar() hace un update en lugar de un insert.
+  parteExistente?: ParteDiario
   onGuardado: () => void
   onCancelar: () => void
 }
@@ -21,11 +26,17 @@ const MAX_ACTIVIDADES = 7
 
 const actividadVacia = (): ActividadEjecutada => ({ area: '', descripcion: '', cantidad: null })
 
+// El campo "Cantidad" de Actividades Ejecutadas ahora guarda las HH que
+// dura esa actividad en particular (ej: 0,5) — no una cantidad de items.
+// Las HH de Fuerza laboral directa por actividad se calculan solas a
+// partir de eso: cantidad (HH x actividad) × operativos del cargo (ej:
+// actividad 1 dura 0,5 → cada técnico operativo suma 0,5 HH en esa
+// columna). Por eso FilaManoObraDirecta ya no guarda "horas" como estado
+// propio — se deriva en cada render con calcularHorasCargo() más abajo.
 interface FilaManoObraDirecta {
   cargo: string
   contratados: number
   operativos: number
-  horas: number[]
 }
 
 interface FilaManoObraIndirecta {
@@ -49,39 +60,84 @@ const sumar = (valores: number[]) => valores.reduce((acc, v) => acc + (v || 0), 
 // (Permiso-Descanso, HH/HM Total x Act., Operativos, totales, acumulados)
 // se hacen acá igual que las fórmulas del Excel original, para que el
 // usuario vea los mismos números antes de generar el archivo.
-export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: ParteDiarioFormProps) => {
-  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
-  const [condicionClimatica, setCondicionClimatica] = useState('')
-  const [actividades, setActividades] = useState<ActividadEjecutada[]>([actividadVacia()])
+export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado, onCancelar }: ParteDiarioFormProps) => {
+  const editando = Boolean(parteExistente)
+  // Si el reporte ya fue enviado (o comentado por el mandante), editarlo no
+  // puede volver a pisar el estado — solo se corrigen los datos del
+  // reporte. Solo en borrador siguen disponibles los dos botones de
+  // siempre (guardar como borrador / enviar).
+  const estadoBloqueado = Boolean(parteExistente && parteExistente.estado !== ParteDiarioEstado.BORRADOR)
 
-  const [manoObraDirecta, setManoObraDirecta] = useState<FilaManoObraDirecta[]>(
-    CARGOS_DIRECTOS.map((cargo) => ({ cargo, contratados: 0, operativos: 0, horas: [] }))
-  )
-  const [manoObraIndirecta, setManoObraIndirecta] = useState<FilaManoObraIndirecta[]>(
-    CARGOS_INDIRECTOS.map((cargo) => ({ cargo, contratados: 0, operativos: 0 }))
-  )
-  const [maquinaria, setMaquinaria] = useState<FilaMaquinaria[]>(
-    EQUIPOS_MAQUINARIA.map((equipo) => ({ equipo, cantidad: 0, mantencion: 0, standby: 0, horas: [] }))
+  const [fecha, setFecha] = useState(() => parteExistente?.fecha ?? new Date().toISOString().slice(0, 10))
+  const [condicionClimatica, setCondicionClimatica] = useState(() => parteExistente?.condicion_climatica ?? '')
+  const [actividades, setActividades] = useState<ActividadEjecutada[]>(() =>
+    parteExistente && parteExistente.actividades.length > 0
+      ? parteExistente.actividades.map((a) => ({ ...a }))
+      : [actividadVacia()]
   )
 
-  const [jornada, setJornada] = useState({
-    inicio: '08:00',
-    fin: '18:00',
-    efectivaEntrada: '08:00',
-    efectivaSalida: '19:00',
-    perdidaEntrada: '00:00',
-    perdidaSalida: '00:00',
+  const [manoObraDirecta, setManoObraDirecta] = useState<FilaManoObraDirecta[]>(() =>
+    CARGOS_DIRECTOS.map((cargo) => {
+      const existente = parteExistente?.mano_obra_directa.find((f) => f.cargo === cargo)
+      return {
+        cargo,
+        contratados: existente?.contratados ?? 0,
+        operativos: existente?.operativos ?? 0,
+      }
+    })
+  )
+  const [manoObraIndirecta, setManoObraIndirecta] = useState<FilaManoObraIndirecta[]>(() =>
+    CARGOS_INDIRECTOS.map((cargo) => {
+      const existente = parteExistente?.mano_obra_indirecta.find((f) => f.cargo === cargo)
+      return {
+        cargo,
+        contratados: existente?.contratados ?? 0,
+        operativos: existente?.operativos ?? 0,
+      }
+    })
+  )
+  const [maquinaria, setMaquinaria] = useState<FilaMaquinaria[]>(() =>
+    EQUIPOS_MAQUINARIA.map((equipo) => {
+      const existente = parteExistente?.maquinaria.find((f) => f.equipo === equipo)
+      return {
+        equipo,
+        cantidad: existente?.cantidad ?? 0,
+        mantencion: existente?.mantencion ?? 0,
+        standby: existente?.standby ?? 0,
+        horas: existente?.horas_por_actividad ? [...existente.horas_por_actividad] : [],
+      }
+    })
+  )
+
+  const [jornada, setJornada] = useState(() => {
+    const j = parteExistente?.jornada
+    return {
+      inicio: j?.inicio ?? '08:00',
+      fin: j?.fin ?? '18:00',
+      efectivaEntrada: j?.horas_efectivas?.entrada ?? '08:00',
+      efectivaSalida: j?.horas_efectivas?.salida ?? '19:00',
+      perdidaEntrada: j?.horas_perdidas?.entrada ?? '00:00',
+      perdidaSalida: j?.horas_perdidas?.salida ?? '00:00',
+    }
   })
 
-  const [hhDirectasProgramado, setHhDirectasProgramado] = useState(0)
-  const [hhIndirectasProgramado, setHhIndirectasProgramado] = useState(0)
+  const [hhDirectasProgramado, setHhDirectasProgramado] = useState(() => parteExistente?.hh_directas_programado ?? 0)
+  const [hhIndirectasProgramado, setHhIndirectasProgramado] = useState(
+    () => parteExistente?.hh_indirectas_programado ?? 0
+  )
 
-  const [comentarioContratistaAutor, setComentarioContratistaAutor] = useState(usuario.nombre)
-  const [comentarioContratista, setComentarioContratista] = useState('')
+  const [comentarioContratistaAutor, setComentarioContratistaAutor] = useState(
+    () => parteExistente?.comentario_contratista_autor ?? usuario.nombre
+  )
+  const [comentarioContratista, setComentarioContratista] = useState(
+    () => parteExistente?.comentario_contratista ?? ''
+  )
 
-  const [fotos, setFotos] = useState<FotoPendiente[]>([])
+  const [fotos, setFotos] = useState<FotoPendiente[]>(() =>
+    (parteExistente?.fotos ?? []).map((f) => ({ url: f.url, caption: f.caption ?? '', preview: f.url }))
+  )
 
-  const [numeroReporte, setNumeroReporte] = useState<number | null>(null)
+  const [numeroReporte, setNumeroReporte] = useState<number | null>(() => parteExistente?.numero_reporte ?? null)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState<'borrador' | 'enviado' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -89,13 +145,16 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
   const numActividades = Math.min(Math.max(actividades.length, 1), MAX_ACTIVIDADES)
 
   useEffect(() => {
+    // En modo edición el N° de reporte ya viene fijo desde parteExistente —
+    // no hay que pedir uno nuevo (correría el correlativo innecesariamente).
+    if (editando) return
     if (!contrato?.id) return
     setIsLoading(true)
     db.obtenerSiguienteNumeroParte(contrato.id)
       .then(setNumeroReporte)
       .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo obtener el N° de reporte'))
       .finally(() => setIsLoading(false))
-  }, [contrato?.id])
+  }, [contrato?.id, editando])
 
   // ---------- Actividades ----------
   const actualizarActividad = (index: number, campo: keyof ActividadEjecutada, valor: string) => {
@@ -119,16 +178,14 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
       prev.map((f, i) => (i === index ? { ...f, [campo]: Number(valor) || 0 } : f))
     )
   }
-  const actualizarHorasDirecta = (index: number, actIndex: number, valor: string) => {
-    setManoObraDirecta((prev) =>
-      prev.map((f, i) => {
-        if (i !== index) return f
-        const horas = [...f.horas]
-        horas[actIndex] = Number(valor) || 0
-        return { ...f, horas }
-      })
-    )
-  }
+
+  // HH de un cargo en cada actividad = HH que dura la actividad (el
+  // "Cantidad" de Actividades Ejecutadas) × operativos de ese cargo. Ya no
+  // se tipea a mano por celda — se deriva de esos dos valores en cada
+  // render, así que si cualquiera de los dos cambia, la tabla se
+  // actualiza sola.
+  const calcularHorasCargo = (fila: FilaManoObraDirecta): number[] =>
+    actividades.slice(0, numActividades).map((act) => (act.cantidad ?? 0) * fila.operativos)
 
   // ---------- Mano de obra indirecta ----------
   const actualizarIndirecta = (index: number, campo: 'contratados' | 'operativos', valor: string) => {
@@ -157,22 +214,20 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
   }
 
   // ---------- Totales calculados (mismas fórmulas que el Excel) ----------
-  const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(f.horas.slice(0, numActividades))))
+  const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(calcularHorasCargo(f))))
   const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => 11 * f.operativos))
   const totalHm = sumar(maquinaria.map((f) => sumar(f.horas.slice(0, numActividades))))
 
   const guardar = async (estadoFinal: ParteDiarioEstado.BORRADOR | ParteDiarioEstado.ENVIADO) => {
-    if (!contrato?.id || numeroReporte === null) return
+    if (!contrato?.id) return
+    if (!editando && numeroReporte === null) return
     setIsSaving(estadoFinal)
     setError(null)
 
     try {
-      const ultimoParte = await db.obtenerUltimoParteDiario(contrato.id)
       const actividadesValidas = actividades.filter((a) => a.area.trim() || a.descripcion.trim())
 
-      const parte = await db.crearParteDiario({
-        contrato_id: contrato.id,
-        numero_reporte: numeroReporte,
+      const camposComunes = {
         fecha,
         condicion_climatica: condicionClimatica || null,
 
@@ -181,7 +236,7 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
           cargo: f.cargo,
           contratados: f.contratados,
           operativos: f.operativos,
-          horas_por_actividad: f.horas.slice(0, numActividades),
+          horas_por_actividad: calcularHorasCargo(f),
         })),
         mano_obra_indirecta: manoObraIndirecta.map((f) => ({
           cargo: f.cargo,
@@ -206,31 +261,65 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
         hh_directas_programado: hhDirectasProgramado,
         hh_indirectas_programado: hhIndirectasProgramado,
 
-        hh_directas_acumuladas: (ultimoParte?.hh_directas_acumuladas ?? 0) + totalHhDirectas,
-        hm_acumuladas: (ultimoParte?.hm_acumuladas ?? 0) + totalHm,
-        hh_indirectas_acumuladas: (ultimoParte?.hh_indirectas_acumuladas ?? 0) + totalHhIndirectas,
-
-        fotos: [],
-
         comentario_contratista_autor: comentarioContratistaAutor || null,
         comentario_contratista: comentarioContratista || null,
+      }
 
-        estado: estadoFinal,
-        creado_por: usuario.id,
-      })
+      let parte: any
 
-      // Fotos: se suben después de crear la fila porque la ruta en Storage
-      // usa el id del parte diario.
-      if (fotos.length > 0) {
-        const subidas = []
-        for (let i = 0; i < fotos.length; i++) {
-          const { file, caption } = fotos[i]
-          const path = `partes-diarios/${contrato.id}/${parte.id}/${i}-${file.name}`
-          await storage.uploadFoto('documentos', path, file)
-          const url = await storage.getPublicUrl('documentos', path)
-          subidas.push({ url, caption })
+      if (editando && parteExistente) {
+        // Al editar NO se tocan las columnas *_acumuladas: recalcularlas
+        // implicaría además recalcular en cascada todos los reportes
+        // posteriores a este (que heredan el acumulado), lo cual queda
+        // fuera de alcance acá. Tampoco se pisa el estado si el reporte ya
+        // fue enviado o comentado por el mandante (ver estadoBloqueado).
+        const updates: Record<string, unknown> = { ...camposComunes }
+        if (!estadoBloqueado) {
+          updates.estado = estadoFinal
         }
-        await db.actualizarParteDiario(parte.id, { fotos: subidas })
+        parte = await db.actualizarParteDiario(parteExistente.id, updates)
+      } else {
+        const ultimoParte = await db.obtenerUltimoParteDiario(contrato.id)
+        parte = await db.crearParteDiario({
+          contrato_id: contrato.id,
+          numero_reporte: numeroReporte,
+          ...camposComunes,
+
+          hh_directas_acumuladas: (ultimoParte?.hh_directas_acumuladas ?? 0) + totalHhDirectas,
+          hm_acumuladas: (ultimoParte?.hm_acumuladas ?? 0) + totalHm,
+          hh_indirectas_acumuladas: (ultimoParte?.hh_indirectas_acumuladas ?? 0) + totalHhIndirectas,
+
+          fotos: [],
+
+          estado: estadoFinal,
+          creado_por: usuario.id,
+        })
+      }
+
+      // Fotos: unifica las nuevas (traen "file", hay que subirlas a Storage)
+      // con las ya existentes (traen "url", vienen de editar un Daily
+      // Report que ya tenía fotos guardadas — se mantienen tal cual, salvo
+      // que el usuario haya cambiado el orden, el pie de foto, o las haya
+      // quitado). El resultado reemplaza por completo el arreglo "fotos" del
+      // parte, así que una foto quitada en el formulario también se quita acá.
+      const fotosFinal: { url: string; caption: string }[] = []
+      for (let i = 0; i < fotos.length; i++) {
+        const foto = fotos[i]
+        if (foto.file) {
+          const path = `partes-diarios/${contrato.id}/${parte.id}/${Date.now()}-${i}-${foto.file.name}`
+          await storage.uploadFoto('documentos', path, foto.file)
+          const url = await storage.getPublicUrl('documentos', path)
+          fotosFinal.push({ url, caption: foto.caption })
+        } else if (foto.url) {
+          fotosFinal.push({ url: foto.url, caption: foto.caption })
+        }
+      }
+      // Al crear, solo hace falta este segundo update si hay fotos que
+      // subir (el insert ya dejó fotos: []). Al editar, siempre hay que
+      // guardar el arreglo final aunque haya quedado vacío, para reflejar
+      // fotos que el usuario haya quitado.
+      if (editando || fotosFinal.length > 0) {
+        await db.actualizarParteDiario(parte.id, { fotos: fotosFinal })
       }
 
       onGuardado()
@@ -249,7 +338,9 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
     <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Nuevo Daily Report</h2>
+          <h2 className="text-xl font-bold text-slate-900">
+            {editando ? 'Editar Daily Report' : 'Nuevo Daily Report'}
+          </h2>
           <p className="text-sm text-slate-500">
             {contrato?.codigo} · {contrato?.nombre}
           </p>
@@ -319,7 +410,9 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
               />
               <input
                 type="number"
-                placeholder="Cantidad"
+                step="0.1"
+                placeholder="HH x actividad"
+                title="Horas que dura esta actividad en particular (ej: 0,5) — se usa para calcular las HH de Fuerza laboral directa."
                 value={actividad.cantidad ?? ''}
                 onChange={(e) => actualizarActividad(index, 'cantidad', e.target.value)}
                 className={inputNumClase}
@@ -344,7 +437,8 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
           Fuerza laboral directa
         </h3>
         <p className="text-xs text-slate-400 mb-3">
-          Horas por actividad — solo se muestran columnas para las {numActividades} actividad(es) cargadas arriba.
+          Las columnas Act.1..Act.{numActividades} se calculan solas: HH x actividad (campo "Cantidad" de
+          Actividades Ejecutadas) × Operativos de cada cargo.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[640px]">
@@ -385,18 +479,13 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
                   <td className="py-1 px-1 text-right text-slate-400 font-mono text-xs">
                     {fila.contratados - fila.operativos}
                   </td>
-                  {Array.from({ length: numActividades }).map((_, actIndex) => (
-                    <td key={actIndex} className="py-1 px-1">
-                      <input
-                        type="number"
-                        value={fila.horas[actIndex] || ''}
-                        onChange={(e) => actualizarHorasDirecta(index, actIndex, e.target.value)}
-                        className={inputNumClase}
-                      />
+                  {calcularHorasCargo(fila).map((horas, actIndex) => (
+                    <td key={actIndex} className="py-1 px-1 text-right font-mono text-xs text-slate-500">
+                      {horas || ''}
                     </td>
                   ))}
                   <td className="py-1 pl-1 text-right font-mono text-xs text-slate-500">
-                    {sumar(fila.horas.slice(0, numActividades))}
+                    {sumar(calcularHorasCargo(fila))}
                   </td>
                 </tr>
               ))}
@@ -601,22 +690,37 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
         <button type="button" onClick={onCancelar} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900">
           Cancelar
         </button>
-        <button
-          type="button"
-          onClick={() => guardar(ParteDiarioEstado.BORRADOR)}
-          disabled={isSaving !== null || isLoading || !contrato?.id}
-          className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {isSaving === 'borrador' ? 'Guardando…' : 'Guardar borrador'}
-        </button>
-        <button
-          type="button"
-          onClick={() => guardar(ParteDiarioEstado.ENVIADO)}
-          disabled={isSaving !== null || isLoading || !contrato?.id}
-          className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
-        >
-          {isSaving === 'enviado' ? 'Enviando…' : 'Enviar reporte'}
-        </button>
+        {estadoBloqueado ? (
+          // El reporte ya fue enviado (o comentado por el mandante): solo
+          // se pueden corregir sus datos, no volver a elegir borrador/envío.
+          <button
+            type="button"
+            onClick={() => guardar(ParteDiarioEstado.ENVIADO)}
+            disabled={isSaving !== null}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
+          >
+            {isSaving !== null ? 'Guardando…' : 'Guardar cambios'}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => guardar(ParteDiarioEstado.BORRADOR)}
+              disabled={isSaving !== null || isLoading || !contrato?.id}
+              className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSaving === 'borrador' ? 'Guardando…' : 'Guardar borrador'}
+            </button>
+            <button
+              type="button"
+              onClick={() => guardar(ParteDiarioEstado.ENVIADO)}
+              disabled={isSaving !== null || isLoading || !contrato?.id}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSaving === 'enviado' ? 'Enviando…' : editando ? 'Guardar y enviar' : 'Enviar reporte'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

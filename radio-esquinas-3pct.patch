@@ -1,0 +1,35 @@
+From ecc543fb6c93dae7fc42fe1911a6b6fe6e1044a9 Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sun, 23 Aug 2026 00:57:23 +0000
+Subject: [PATCH] Reduce el radio de esquinas de las fotos del Excel a 3%
+
+Con 32% se veia como una esquina cortada en diagonal en fotos grandes.
+3% da un redondeo sutil, apenas perceptible pero presente.
+---
+ src/lib/generarExcelParteDiario.ts | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/lib/generarExcelParteDiario.ts b/src/lib/generarExcelParteDiario.ts
+index c1303da..d4b2d76 100644
+--- a/src/lib/generarExcelParteDiario.ts
++++ b/src/lib/generarExcelParteDiario.ts
+@@ -45,11 +45,11 @@ const N_ANCLAS_PLANTILLA_IMAGENES = 2
+ // no tiene forma de pedir esto por API, así que se edita el XML del dibujo
+ // directamente después de generarlo (mismo mecanismo que restaurarGraficoOriginal
+ // usa para el gráfico). El radio es un % (sobre 50000 = 50%) del lado más
+-// corto del recuadro: 16667 (el valor por defecto del estilo "Rectángulo
+-// redondeado" de Office) se ve casi imperceptible en fotos grandes como
+-// estas, así que se usa un radio más generoso para que el redondeo se
+-// note de verdad.
+-const RADIO_ESQUINA_FOTO = 32000 // 32% del lado más corto
++// corto del recuadro. Se probó primero en 32000 (32%) pero en fotos
++// grandes como estas se veía como una esquina cortada en diagonal, muy
++// exagerado — 3000 (3%) da un redondeo sutil, apenas perceptible pero
++// presente.
++const RADIO_ESQUINA_FOTO = 3000 // 3% del lado más corto
+ 
+ // numFotos acota el redondeo a las anclas que de verdad son fotos: las
+ // primeras N_ANCLAS_PLANTILLA_IMAGENES son los logos (no se tocan) y todo
+-- 
+2.43.0
+

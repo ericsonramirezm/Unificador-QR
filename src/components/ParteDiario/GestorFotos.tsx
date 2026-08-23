@@ -1,9 +1,13 @@
 import { useRef, useState } from 'react'
 
 export interface FotoPendiente {
-  file: File
+  // Una de las dos, según si es una foto nueva (recién elegida en este
+  // formulario, todavía no subida) o una ya existente (al editar un
+  // Daily Report que ya tenía fotos guardadas en Storage).
+  file?: File
+  url?: string
   caption: string
-  preview: string
+  preview: string // <img src> — blob: para nuevas, la URL real para existentes
 }
 
 interface GestorFotosProps {

@@ -1,0 +1,665 @@
+From 326acdb0e6c8feb57a3500c7cd75d722c1d5e3c1 Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sun, 23 Aug 2026 00:16:38 +0000
+Subject: [PATCH] Agrega Dashboard de HH acumuladas, Editar y Eliminar Daily
+ Report
+
+- Dashboard: tarjetas con total de Daily Reports y HH/HM acumuladas
+  (tomadas del ultimo reporte por numero_reporte, no una suma ingenua).
+- Editar: ParteDiarioForm ahora acepta un Daily Report existente y lo
+  edita en vez de crear uno nuevo. No toca los acumulados ni el numero
+  de reporte; si el reporte ya fue enviado o comentado por el mandante,
+  solo permite corregir datos sin volver a elegir borrador/envio.
+- Eliminar: nuevo db.eliminarParteDiario(), boton en la lista y en el
+  detalle, con confirmacion. Solo visible para coordinador (unico rol
+  con policy de delete en partes_diarios).
+- Permisos compartidos (puedeCrear/puedeEditar/puedeEliminar) movidos a
+  un modulo permisos.ts para reusar entre ParteDiarioList y
+  ParteDiarioDetalle.
+---
+ src/components/ParteDiario/GestorFotos.tsx    |   8 +-
+ .../ParteDiario/ParteDiarioDetalle.tsx        |  40 ++-
+ .../ParteDiario/ParteDiarioForm.tsx           | 233 +++++++++++++-----
+ .../ParteDiario/ParteDiarioList.tsx           |  92 ++++++-
+ src/components/ParteDiario/permisos.ts        |  22 ++
+ src/lib/supabase.ts                           |   8 +
+ 6 files changed, 328 insertions(+), 75 deletions(-)
+ create mode 100644 src/components/ParteDiario/permisos.ts
+
+diff --git a/src/components/ParteDiario/GestorFotos.tsx b/src/components/ParteDiario/GestorFotos.tsx
+index 4efa62e..76042fa 100644
+--- a/src/components/ParteDiario/GestorFotos.tsx
++++ b/src/components/ParteDiario/GestorFotos.tsx
+@@ -1,9 +1,13 @@
+ import { useRef, useState } from 'react'
+ 
+ export interface FotoPendiente {
+-  file: File
++  // Una de las dos, según si es una foto nueva (recién elegida en este
++  // formulario, todavía no subida) o una ya existente (al editar un
++  // Daily Report que ya tenía fotos guardadas en Storage).
++  file?: File
++  url?: string
+   caption: string
+-  preview: string
++  preview: string // <img src> — blob: para nuevas, la URL real para existentes
+ }
+ 
+ interface GestorFotosProps {
+diff --git a/src/components/ParteDiario/ParteDiarioDetalle.tsx b/src/components/ParteDiario/ParteDiarioDetalle.tsx
+index affa782..c04d881 100644
+--- a/src/components/ParteDiario/ParteDiarioDetalle.tsx
++++ b/src/components/ParteDiario/ParteDiarioDetalle.tsx
+@@ -2,17 +2,21 @@ import { useEffect, useState } from 'react'
+ import { db } from '@lib/supabase'
+ import { ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
+ import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
++import { puedeEditar, puedeEliminar } from './permisos'
+ 
+ interface ParteDiarioDetalleProps {
+   usuario: Usuario
+   parteId: string
+   onVolver: () => void
++  // Opcional porque no todos los que muestran este detalle necesariamente
++  // ofrecen edición (por ahora ParteDiarioList siempre la pasa).
++  onEditar?: (parte: ParteDiario) => void
+ }
+ 
+ const sumarHoras = (items: any[], campo: string) =>
+   items.reduce((acc, item) => acc + (Array.isArray(item[campo]) ? item[campo].reduce((a: number, h: number) => a + (h || 0), 0) : 0), 0)
+ 
+-export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDetalleProps) => {
++export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: ParteDiarioDetalleProps) => {
+   const [parte, setParte] = useState<ParteDiario | null>(null)
+   const [isLoading, setIsLoading] = useState(true)
+   const [error, setError] = useState<string | null>(null)
+@@ -22,6 +26,7 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
+   const [isComentando, setIsComentando] = useState(false)
+ 
+   const [isGenerandoExcel, setIsGenerandoExcel] = useState(false)
++  const [isEliminando, setIsEliminando] = useState(false)
+ 
+   const cargar = async () => {
+     setIsLoading(true)
+@@ -70,6 +75,22 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
+     }
+   }
+ 
++  const eliminar = async () => {
++    if (!parte) return
++    if (!window.confirm(`¿Eliminar el Daily Report N° ${String(parte.numero_reporte).padStart(3, '0')}? Esta acción no se puede deshacer.`)) {
++      return
++    }
++    setIsEliminando(true)
++    setError(null)
++    try {
++      await db.eliminarParteDiario(parte.id)
++      onVolver()
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'No se pudo eliminar el Daily Report')
++      setIsEliminando(false)
++    }
++  }
++
+   if (isLoading) return <div className="bg-white rounded-lg border border-slate-200 p-6 text-sm text-slate-500">Cargando…</div>
+   if (!parte) return <div className="bg-white rounded-lg border border-slate-200 p-6 text-sm text-red-600">{error ?? 'No encontrado'}</div>
+ 
+@@ -99,6 +120,23 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver }: ParteDiarioDe
+           </div>
+           <div className="flex items-center gap-3">
+             <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{parte.estado}</span>
++            {onEditar && puedeEditar(usuario, parte) && (
++              <button
++                onClick={() => onEditar(parte)}
++                className="px-3 py-1.5 border border-blue-200 text-blue-600 text-sm font-semibold rounded-lg hover:bg-blue-50 transition-colors"
++              >
++                ✎ Editar
++              </button>
++            )}
++            {puedeEliminar(usuario) && (
++              <button
++                onClick={eliminar}
++                disabled={isEliminando}
++                className="px-3 py-1.5 border border-red-200 text-red-600 text-sm font-semibold rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
++              >
++                {isEliminando ? 'Eliminando…' : '🗑 Eliminar'}
++              </button>
++            )}
+             <button
+               onClick={descargarExcel}
+               disabled={isGenerandoExcel}
+diff --git a/src/components/ParteDiario/ParteDiarioForm.tsx b/src/components/ParteDiario/ParteDiarioForm.tsx
+index 973ace0..76fb7e4 100644
+--- a/src/components/ParteDiario/ParteDiarioForm.tsx
++++ b/src/components/ParteDiario/ParteDiarioForm.tsx
+@@ -5,6 +5,7 @@ import {
+   CARGOS_DIRECTOS,
+   CARGOS_INDIRECTOS,
+   EQUIPOS_MAQUINARIA,
++  ParteDiario,
+   ParteDiarioEstado,
+   Usuario,
+ } from '@/types/index'
+@@ -13,6 +14,10 @@ import { FotoPendiente, GestorFotos } from './GestorFotos'
+ interface ParteDiarioFormProps {
+   usuario: Usuario
+   contrato: any
++  // Si viene seteado, el formulario entra en modo edición: hidrata todos
++  // los campos desde este Daily Report existente en vez de partir vacío, y
++  // guardar() hace un update en lugar de un insert.
++  parteExistente?: ParteDiario
+   onGuardado: () => void
+   onCancelar: () => void
+ }
+@@ -49,39 +54,85 @@ const sumar = (valores: number[]) => valores.reduce((acc, v) => acc + (v || 0),
+ // (Permiso-Descanso, HH/HM Total x Act., Operativos, totales, acumulados)
+ // se hacen acá igual que las fórmulas del Excel original, para que el
+ // usuario vea los mismos números antes de generar el archivo.
+-export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: ParteDiarioFormProps) => {
+-  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
+-  const [condicionClimatica, setCondicionClimatica] = useState('')
+-  const [actividades, setActividades] = useState<ActividadEjecutada[]>([actividadVacia()])
++export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado, onCancelar }: ParteDiarioFormProps) => {
++  const editando = Boolean(parteExistente)
++  // Si el reporte ya fue enviado (o comentado por el mandante), editarlo no
++  // puede volver a pisar el estado — solo se corrigen los datos del
++  // reporte. Solo en borrador siguen disponibles los dos botones de
++  // siempre (guardar como borrador / enviar).
++  const estadoBloqueado = Boolean(parteExistente && parteExistente.estado !== ParteDiarioEstado.BORRADOR)
++
++  const [fecha, setFecha] = useState(() => parteExistente?.fecha ?? new Date().toISOString().slice(0, 10))
++  const [condicionClimatica, setCondicionClimatica] = useState(() => parteExistente?.condicion_climatica ?? '')
++  const [actividades, setActividades] = useState<ActividadEjecutada[]>(() =>
++    parteExistente && parteExistente.actividades.length > 0
++      ? parteExistente.actividades.map((a) => ({ ...a }))
++      : [actividadVacia()]
++  )
+ 
+-  const [manoObraDirecta, setManoObraDirecta] = useState<FilaManoObraDirecta[]>(
+-    CARGOS_DIRECTOS.map((cargo) => ({ cargo, contratados: 0, operativos: 0, horas: [] }))
++  const [manoObraDirecta, setManoObraDirecta] = useState<FilaManoObraDirecta[]>(() =>
++    CARGOS_DIRECTOS.map((cargo) => {
++      const existente = parteExistente?.mano_obra_directa.find((f) => f.cargo === cargo)
++      return {
++        cargo,
++        contratados: existente?.contratados ?? 0,
++        operativos: existente?.operativos ?? 0,
++        horas: existente?.horas_por_actividad ? [...existente.horas_por_actividad] : [],
++      }
++    })
+   )
+-  const [manoObraIndirecta, setManoObraIndirecta] = useState<FilaManoObraIndirecta[]>(
+-    CARGOS_INDIRECTOS.map((cargo) => ({ cargo, contratados: 0, operativos: 0 }))
++  const [manoObraIndirecta, setManoObraIndirecta] = useState<FilaManoObraIndirecta[]>(() =>
++    CARGOS_INDIRECTOS.map((cargo) => {
++      const existente = parteExistente?.mano_obra_indirecta.find((f) => f.cargo === cargo)
++      return {
++        cargo,
++        contratados: existente?.contratados ?? 0,
++        operativos: existente?.operativos ?? 0,
++      }
++    })
+   )
+-  const [maquinaria, setMaquinaria] = useState<FilaMaquinaria[]>(
+-    EQUIPOS_MAQUINARIA.map((equipo) => ({ equipo, cantidad: 0, mantencion: 0, standby: 0, horas: [] }))
++  const [maquinaria, setMaquinaria] = useState<FilaMaquinaria[]>(() =>
++    EQUIPOS_MAQUINARIA.map((equipo) => {
++      const existente = parteExistente?.maquinaria.find((f) => f.equipo === equipo)
++      return {
++        equipo,
++        cantidad: existente?.cantidad ?? 0,
++        mantencion: existente?.mantencion ?? 0,
++        standby: existente?.standby ?? 0,
++        horas: existente?.horas_por_actividad ? [...existente.horas_por_actividad] : [],
++      }
++    })
+   )
+ 
+-  const [jornada, setJornada] = useState({
+-    inicio: '08:00',
+-    fin: '18:00',
+-    efectivaEntrada: '08:00',
+-    efectivaSalida: '19:00',
+-    perdidaEntrada: '00:00',
+-    perdidaSalida: '00:00',
++  const [jornada, setJornada] = useState(() => {
++    const j = parteExistente?.jornada
++    return {
++      inicio: j?.inicio ?? '08:00',
++      fin: j?.fin ?? '18:00',
++      efectivaEntrada: j?.horas_efectivas?.entrada ?? '08:00',
++      efectivaSalida: j?.horas_efectivas?.salida ?? '19:00',
++      perdidaEntrada: j?.horas_perdidas?.entrada ?? '00:00',
++      perdidaSalida: j?.horas_perdidas?.salida ?? '00:00',
++    }
+   })
+ 
+-  const [hhDirectasProgramado, setHhDirectasProgramado] = useState(0)
+-  const [hhIndirectasProgramado, setHhIndirectasProgramado] = useState(0)
++  const [hhDirectasProgramado, setHhDirectasProgramado] = useState(() => parteExistente?.hh_directas_programado ?? 0)
++  const [hhIndirectasProgramado, setHhIndirectasProgramado] = useState(
++    () => parteExistente?.hh_indirectas_programado ?? 0
++  )
+ 
+-  const [comentarioContratistaAutor, setComentarioContratistaAutor] = useState(usuario.nombre)
+-  const [comentarioContratista, setComentarioContratista] = useState('')
++  const [comentarioContratistaAutor, setComentarioContratistaAutor] = useState(
++    () => parteExistente?.comentario_contratista_autor ?? usuario.nombre
++  )
++  const [comentarioContratista, setComentarioContratista] = useState(
++    () => parteExistente?.comentario_contratista ?? ''
++  )
+ 
+-  const [fotos, setFotos] = useState<FotoPendiente[]>([])
++  const [fotos, setFotos] = useState<FotoPendiente[]>(() =>
++    (parteExistente?.fotos ?? []).map((f) => ({ url: f.url, caption: f.caption ?? '', preview: f.url }))
++  )
+ 
+-  const [numeroReporte, setNumeroReporte] = useState<number | null>(null)
++  const [numeroReporte, setNumeroReporte] = useState<number | null>(() => parteExistente?.numero_reporte ?? null)
+   const [isLoading, setIsLoading] = useState(false)
+   const [isSaving, setIsSaving] = useState<'borrador' | 'enviado' | null>(null)
+   const [error, setError] = useState<string | null>(null)
+@@ -89,13 +140,16 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+   const numActividades = Math.min(Math.max(actividades.length, 1), MAX_ACTIVIDADES)
+ 
+   useEffect(() => {
++    // En modo edición el N° de reporte ya viene fijo desde parteExistente —
++    // no hay que pedir uno nuevo (correría el correlativo innecesariamente).
++    if (editando) return
+     if (!contrato?.id) return
+     setIsLoading(true)
+     db.obtenerSiguienteNumeroParte(contrato.id)
+       .then(setNumeroReporte)
+       .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo obtener el N° de reporte'))
+       .finally(() => setIsLoading(false))
+-  }, [contrato?.id])
++  }, [contrato?.id, editando])
+ 
+   // ---------- Actividades ----------
+   const actualizarActividad = (index: number, campo: keyof ActividadEjecutada, valor: string) => {
+@@ -162,17 +216,15 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+   const totalHm = sumar(maquinaria.map((f) => sumar(f.horas.slice(0, numActividades))))
+ 
+   const guardar = async (estadoFinal: ParteDiarioEstado.BORRADOR | ParteDiarioEstado.ENVIADO) => {
+-    if (!contrato?.id || numeroReporte === null) return
++    if (!contrato?.id) return
++    if (!editando && numeroReporte === null) return
+     setIsSaving(estadoFinal)
+     setError(null)
+ 
+     try {
+-      const ultimoParte = await db.obtenerUltimoParteDiario(contrato.id)
+       const actividadesValidas = actividades.filter((a) => a.area.trim() || a.descripcion.trim())
+ 
+-      const parte = await db.crearParteDiario({
+-        contrato_id: contrato.id,
+-        numero_reporte: numeroReporte,
++      const camposComunes = {
+         fecha,
+         condicion_climatica: condicionClimatica || null,
+ 
+@@ -206,31 +258,65 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+         hh_directas_programado: hhDirectasProgramado,
+         hh_indirectas_programado: hhIndirectasProgramado,
+ 
+-        hh_directas_acumuladas: (ultimoParte?.hh_directas_acumuladas ?? 0) + totalHhDirectas,
+-        hm_acumuladas: (ultimoParte?.hm_acumuladas ?? 0) + totalHm,
+-        hh_indirectas_acumuladas: (ultimoParte?.hh_indirectas_acumuladas ?? 0) + totalHhIndirectas,
+-
+-        fotos: [],
+-
+         comentario_contratista_autor: comentarioContratistaAutor || null,
+         comentario_contratista: comentarioContratista || null,
++      }
+ 
+-        estado: estadoFinal,
+-        creado_por: usuario.id,
+-      })
++      let parte: any
++
++      if (editando && parteExistente) {
++        // Al editar NO se tocan las columnas *_acumuladas: recalcularlas
++        // implicaría además recalcular en cascada todos los reportes
++        // posteriores a este (que heredan el acumulado), lo cual queda
++        // fuera de alcance acá. Tampoco se pisa el estado si el reporte ya
++        // fue enviado o comentado por el mandante (ver estadoBloqueado).
++        const updates: Record<string, unknown> = { ...camposComunes }
++        if (!estadoBloqueado) {
++          updates.estado = estadoFinal
++        }
++        parte = await db.actualizarParteDiario(parteExistente.id, updates)
++      } else {
++        const ultimoParte = await db.obtenerUltimoParteDiario(contrato.id)
++        parte = await db.crearParteDiario({
++          contrato_id: contrato.id,
++          numero_reporte: numeroReporte,
++          ...camposComunes,
++
++          hh_directas_acumuladas: (ultimoParte?.hh_directas_acumuladas ?? 0) + totalHhDirectas,
++          hm_acumuladas: (ultimoParte?.hm_acumuladas ?? 0) + totalHm,
++          hh_indirectas_acumuladas: (ultimoParte?.hh_indirectas_acumuladas ?? 0) + totalHhIndirectas,
++
++          fotos: [],
++
++          estado: estadoFinal,
++          creado_por: usuario.id,
++        })
++      }
+ 
+-      // Fotos: se suben después de crear la fila porque la ruta en Storage
+-      // usa el id del parte diario.
+-      if (fotos.length > 0) {
+-        const subidas = []
+-        for (let i = 0; i < fotos.length; i++) {
+-          const { file, caption } = fotos[i]
+-          const path = `partes-diarios/${contrato.id}/${parte.id}/${i}-${file.name}`
+-          await storage.uploadFoto('documentos', path, file)
++      // Fotos: unifica las nuevas (traen "file", hay que subirlas a Storage)
++      // con las ya existentes (traen "url", vienen de editar un Daily
++      // Report que ya tenía fotos guardadas — se mantienen tal cual, salvo
++      // que el usuario haya cambiado el orden, el pie de foto, o las haya
++      // quitado). El resultado reemplaza por completo el arreglo "fotos" del
++      // parte, así que una foto quitada en el formulario también se quita acá.
++      const fotosFinal: { url: string; caption: string }[] = []
++      for (let i = 0; i < fotos.length; i++) {
++        const foto = fotos[i]
++        if (foto.file) {
++          const path = `partes-diarios/${contrato.id}/${parte.id}/${Date.now()}-${i}-${foto.file.name}`
++          await storage.uploadFoto('documentos', path, foto.file)
+           const url = await storage.getPublicUrl('documentos', path)
+-          subidas.push({ url, caption })
++          fotosFinal.push({ url, caption: foto.caption })
++        } else if (foto.url) {
++          fotosFinal.push({ url: foto.url, caption: foto.caption })
+         }
+-        await db.actualizarParteDiario(parte.id, { fotos: subidas })
++      }
++      // Al crear, solo hace falta este segundo update si hay fotos que
++      // subir (el insert ya dejó fotos: []). Al editar, siempre hay que
++      // guardar el arreglo final aunque haya quedado vacío, para reflejar
++      // fotos que el usuario haya quitado.
++      if (editando || fotosFinal.length > 0) {
++        await db.actualizarParteDiario(parte.id, { fotos: fotosFinal })
+       }
+ 
+       onGuardado()
+@@ -249,7 +335,9 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+     <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-8">
+       <div className="flex items-center justify-between">
+         <div>
+-          <h2 className="text-xl font-bold text-slate-900">Nuevo Daily Report</h2>
++          <h2 className="text-xl font-bold text-slate-900">
++            {editando ? 'Editar Daily Report' : 'Nuevo Daily Report'}
++          </h2>
+           <p className="text-sm text-slate-500">
+             {contrato?.codigo} · {contrato?.nombre}
+           </p>
+@@ -601,22 +689,37 @@ export const ParteDiarioForm = ({ usuario, contrato, onGuardado, onCancelar }: P
+         <button type="button" onClick={onCancelar} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900">
+           Cancelar
+         </button>
+-        <button
+-          type="button"
+-          onClick={() => guardar(ParteDiarioEstado.BORRADOR)}
+-          disabled={isSaving !== null || isLoading || !contrato?.id}
+-          className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+-        >
+-          {isSaving === 'borrador' ? 'Guardando…' : 'Guardar borrador'}
+-        </button>
+-        <button
+-          type="button"
+-          onClick={() => guardar(ParteDiarioEstado.ENVIADO)}
+-          disabled={isSaving !== null || isLoading || !contrato?.id}
+-          className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
+-        >
+-          {isSaving === 'enviado' ? 'Enviando…' : 'Enviar reporte'}
+-        </button>
++        {estadoBloqueado ? (
++          // El reporte ya fue enviado (o comentado por el mandante): solo
++          // se pueden corregir sus datos, no volver a elegir borrador/envío.
++          <button
++            type="button"
++            onClick={() => guardar(ParteDiarioEstado.ENVIADO)}
++            disabled={isSaving !== null}
++            className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
++          >
++            {isSaving !== null ? 'Guardando…' : 'Guardar cambios'}
++          </button>
++        ) : (
++          <>
++            <button
++              type="button"
++              onClick={() => guardar(ParteDiarioEstado.BORRADOR)}
++              disabled={isSaving !== null || isLoading || !contrato?.id}
++              className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
++            >
++              {isSaving === 'borrador' ? 'Guardando…' : 'Guardar borrador'}
++            </button>
++            <button
++              type="button"
++              onClick={() => guardar(ParteDiarioEstado.ENVIADO)}
++              disabled={isSaving !== null || isLoading || !contrato?.id}
++              className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
++            >
++              {isSaving === 'enviado' ? 'Enviando…' : editando ? 'Guardar y enviar' : 'Enviar reporte'}
++            </button>
++          </>
++        )}
+       </div>
+     </div>
+   )
+diff --git a/src/components/ParteDiario/ParteDiarioList.tsx b/src/components/ParteDiario/ParteDiarioList.tsx
+index a1ed7cc..e497bae 100644
+--- a/src/components/ParteDiario/ParteDiarioList.tsx
++++ b/src/components/ParteDiario/ParteDiarioList.tsx
+@@ -1,8 +1,9 @@
+ import { useEffect, useState } from 'react'
+ import { db } from '@lib/supabase'
+-import { ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
++import { ParteDiario, ParteDiarioEstado, Usuario } from '@/types/index'
+ import { ParteDiarioForm } from './ParteDiarioForm'
+ import { ParteDiarioDetalle } from './ParteDiarioDetalle'
++import { puedeCrear, puedeEditar, puedeEliminar } from './permisos'
+ 
+ interface ParteDiarioListProps {
+   usuario: Usuario
+@@ -21,15 +22,12 @@ const COLOR_ESTADO: Record<ParteDiarioEstado, string> = {
+   [ParteDiarioEstado.COMENTADO_MANDANTE]: 'bg-emerald-100 text-emerald-700',
+ }
+ 
+-// El rol "supervisor" no tiene acceso al módulo Daily Report (ver
+-// Layout.tsx y remove_supervisor_daily_report.sql).
+-const puedeCrear = (rol: UserRole) => rol === UserRole.COORDINADOR || rol === UserRole.APR
+-
+ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => {
+   const [partes, setPartes] = useState<ParteDiario[]>([])
+   const [isLoading, setIsLoading] = useState(true)
+   const [error, setError] = useState<string | null>(null)
+   const [mostrarFormulario, setMostrarFormulario] = useState(false)
++  const [parteAEditar, setParteAEditar] = useState<ParteDiario | null>(null)
+   const [parteSeleccionado, setParteSeleccionado] = useState<string | null>(null)
+ 
+   const cargarPartes = async () => {
+@@ -51,6 +49,18 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [contrato?.id])
+ 
++  const eliminarParte = async (parte: ParteDiario) => {
++    if (!window.confirm(`¿Eliminar el Daily Report N° ${String(parte.numero_reporte).padStart(3, '0')}? Esta acción no se puede deshacer.`)) {
++      return
++    }
++    try {
++      await db.eliminarParteDiario(parte.id)
++      cargarPartes()
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'No se pudo eliminar el Daily Report')
++    }
++  }
++
+   if (!contrato?.id) {
+     return (
+       <div className="bg-white rounded-lg border border-slate-200 p-6 text-sm text-slate-500">
+@@ -59,14 +69,19 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+     )
+   }
+ 
+-  if (mostrarFormulario) {
++  if (mostrarFormulario || parteAEditar) {
+     return (
+       <ParteDiarioForm
+         usuario={usuario}
+         contrato={contrato}
+-        onCancelar={() => setMostrarFormulario(false)}
++        parteExistente={parteAEditar ?? undefined}
++        onCancelar={() => {
++          setMostrarFormulario(false)
++          setParteAEditar(null)
++        }}
+         onGuardado={() => {
+           setMostrarFormulario(false)
++          setParteAEditar(null)
+           cargarPartes()
+         }}
+       />
+@@ -82,6 +97,10 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+           setParteSeleccionado(null)
+           cargarPartes()
+         }}
++        onEditar={(parte) => {
++          setParteSeleccionado(null)
++          setParteAEditar(parte)
++        }}
+       />
+     )
+   }
+@@ -109,6 +128,36 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{error}</div>
+       )}
+ 
++      {!isLoading && partes.length > 0 && (() => {
++        // partes viene ordenado por numero_reporte descendente (ver
++        // obtenerPartesDiarios), así que partes[0] es el último Daily
++        // Report — y sus columnas *_acumuladas ya traen la suma de todos
++        // los anteriores más las de él mismo. No hay que sumar columna por
++        // columna a través de todas las filas: cada "acumuladas" es un
++        // snapshot corrido, no un delta — sumarlas todas contaría de más.
++        const ultimo = partes[0]
++        return (
++          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
++            <div className="bg-white rounded-lg border border-slate-200 p-4">
++              <p className="text-xs text-slate-500 uppercase">Daily Reports</p>
++              <p className="text-2xl font-bold text-slate-900">{partes.length}</p>
++            </div>
++            <div className="bg-white rounded-lg border border-slate-200 p-4">
++              <p className="text-xs text-slate-500 uppercase">HH Directas acum.</p>
++              <p className="text-2xl font-bold text-slate-900">{ultimo.hh_directas_acumuladas ?? 0}</p>
++            </div>
++            <div className="bg-white rounded-lg border border-slate-200 p-4">
++              <p className="text-xs text-slate-500 uppercase">HM Maquinaria acum.</p>
++              <p className="text-2xl font-bold text-slate-900">{ultimo.hm_acumuladas ?? 0}</p>
++            </div>
++            <div className="bg-white rounded-lg border border-slate-200 p-4">
++              <p className="text-xs text-slate-500 uppercase">HH Indirectas acum.</p>
++              <p className="text-2xl font-bold text-slate-900">{ultimo.hh_indirectas_acumuladas ?? 0}</p>
++            </div>
++          </div>
++        )
++      })()}
++
+       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+         {isLoading ? (
+           <div className="p-6 text-sm text-slate-500">Cargando…</div>
+@@ -122,6 +171,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+                 <th className="text-left px-4 py-3">Fecha</th>
+                 <th className="text-left px-4 py-3">Creado por</th>
+                 <th className="text-left px-4 py-3">Estado</th>
++                <th className="text-right px-4 py-3">Acciones</th>
+               </tr>
+             </thead>
+             <tbody className="divide-y divide-slate-100">
+@@ -141,6 +191,34 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) =>
+                       {ETIQUETA_ESTADO[parte.estado]}
+                     </span>
+                   </td>
++                  <td className="px-4 py-3">
++                    <div className="flex items-center justify-end gap-2">
++                      {puedeEditar(usuario, parte) && (
++                        <button
++                          type="button"
++                          onClick={(e) => {
++                            e.stopPropagation()
++                            setParteAEditar(parte)
++                          }}
++                          className="px-2 py-1 border border-blue-200 text-blue-600 text-xs font-semibold rounded-md hover:bg-blue-50 transition-colors"
++                        >
++                          Editar
++                        </button>
++                      )}
++                      {puedeEliminar(usuario) && (
++                        <button
++                          type="button"
++                          onClick={(e) => {
++                            e.stopPropagation()
++                            eliminarParte(parte)
++                          }}
++                          className="px-2 py-1 border border-red-200 text-red-600 text-xs font-semibold rounded-md hover:bg-red-50 transition-colors"
++                        >
++                          Eliminar
++                        </button>
++                      )}
++                    </div>
++                  </td>
+                 </tr>
+               ))}
+             </tbody>
+diff --git a/src/components/ParteDiario/permisos.ts b/src/components/ParteDiario/permisos.ts
+new file mode 100644
+index 0000000..6615fb8
+--- /dev/null
++++ b/src/components/ParteDiario/permisos.ts
+@@ -0,0 +1,22 @@
++import { ParteDiario, UserRole, Usuario } from '@/types/index'
++
++// El rol "supervisor" no tiene acceso al módulo Daily Report en absoluto
++// (ver Layout.tsx y remove_supervisor_daily_report.sql) — por eso no
++// aparece en ninguno de estos helpers.
++
++export const puedeCrear = (rol: UserRole) => rol === UserRole.COORDINADOR || rol === UserRole.APR
++
++// Coordinador puede editar cualquier Daily Report del contrato; apr solo
++// los que él mismo creó. Esto es solo la UI — la barrera real está en las
++// policies RLS de partes_diarios, que siguen el mismo criterio.
++export const puedeEditar = (usuario: Usuario, parte: ParteDiario) => {
++  if (usuario.rol === UserRole.COORDINADOR) return true
++  if (usuario.rol === UserRole.APR) return parte.creado_por === usuario.id
++  return false
++}
++
++// Eliminar es más restrictivo: en la base de datos solo coordinador tiene
++// policy de delete sobre partes_diarios (apr no tiene ninguna). Este
++// helper solo refleja esa misma regla en la UI para no mostrar un botón
++// que el servidor va a rechazar.
++export const puedeEliminar = (usuario: Usuario) => usuario.rol === UserRole.COORDINADOR
+diff --git a/src/lib/supabase.ts b/src/lib/supabase.ts
+index 8f28645..61fef4f 100644
+--- a/src/lib/supabase.ts
++++ b/src/lib/supabase.ts
+@@ -409,6 +409,14 @@ export const db = {
+     return data
+   },
+ 
++  // Solo coordinador tiene policy de delete sobre partes_diarios (apr no
++  // tiene — ver add_partes_diarios.sql), así que esto falla en el server
++  // si lo llama cualquier otro rol, incluso si la UI lo permitiera.
++  async eliminarParteDiario(id: string) {
++    const { error } = await supabase.from('partes_diarios').delete().eq('id', id)
++    if (error) throw error
++  },
++
+   async obtenerPartesDiarios(contratoId: string) {
+     // Ordenado por número de reporte (no por fecha): dos reportes pueden
+     // crearse fuera de orden respecto a su fecha real (por ejemplo, un
+-- 
+2.43.0
+

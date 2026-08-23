@@ -1,0 +1,45 @@
+From bd4b74331f258bfd6934cbafa2325ddf81f3715d Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sat, 22 Aug 2026 23:31:28 +0000
+Subject: [PATCH] Aumenta el radio de las esquinas redondeadas de las fotos
+
+El radio por defecto de Office (16667 = ~16.7%) casi no se notaba en
+fotos grandes como estas. Subido a 32000 (~32% del lado mas corto) para
+que el redondeo se vea claramente, verificado visualmente convirtiendo a
+PDF con LibreOffice.
+---
+ src/lib/generarExcelParteDiario.ts | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/lib/generarExcelParteDiario.ts b/src/lib/generarExcelParteDiario.ts
+index 54c36f1..c28eb01 100644
+--- a/src/lib/generarExcelParteDiario.ts
++++ b/src/lib/generarExcelParteDiario.ts
+@@ -44,8 +44,13 @@ const N_ANCLAS_PLANTILLA_IMAGENES = 2
+ // Redondea las esquinas de las fotos insertadas (no las del logo): ExcelJS
+ // no tiene forma de pedir esto por API, así que se edita el XML del dibujo
+ // directamente después de generarlo (mismo mecanismo que restaurarGraficoOriginal
+-// usa para el gráfico). 16667 es el radio de esquina que usa por defecto el
+-// estilo "Rectángulo redondeado" nativo de Office.
++// usa para el gráfico). El radio es un % (sobre 50000 = 50%) del lado más
++// corto del recuadro: 16667 (el valor por defecto del estilo "Rectángulo
++// redondeado" de Office) se ve casi imperceptible en fotos grandes como
++// estas, así que se usa un radio más generoso para que el redondeo se
++// note de verdad.
++const RADIO_ESQUINA_FOTO = 32000 // 32% del lado más corto
++
+ function redondearEsquinasFotos(xmlDrawing: string): string {
+   let contador = 0
+   return xmlDrawing.replace(/<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g, (bloque) => {
+@@ -53,7 +58,7 @@ function redondearEsquinasFotos(xmlDrawing: string): string {
+     if (contador <= N_ANCLAS_PLANTILLA_IMAGENES) return bloque
+     return bloque.replace(
+       '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
+-      '<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val 16667"/></a:avLst></a:prstGeom>'
++      `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${RADIO_ESQUINA_FOTO}"/></a:avLst></a:prstGeom>`
+     )
+   })
+ }
+-- 
+2.43.0
+

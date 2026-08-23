@@ -1,0 +1,465 @@
+From b40df22e894262f337aa560823c5efa976d2a4e0 Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sun, 23 Aug 2026 01:15:01 +0000
+Subject: [PATCH] Calcula HH x actividad en Fuerza laboral directa y firma
+ dinamica por coordinador
+
+- Actividades Ejecutadas: el campo 'Cantidad' ahora es 'HH x actividad'
+  (ej: 0,5). Las columnas Act.1..Act.N de Fuerza laboral directa ya no
+  se tipean a mano: se calculan solas como HH x actividad x operativos
+  de cada cargo. Maquinaria y Fuerza laboral indirecta no cambian.
+
+- Firma del Coordinador de Terreno en el Excel: en vez del nombre fijo
+  que traia la plantilla (Ericson Ramirez, escrito en el propio archivo),
+  ahora se usa el nombre y la firma_url de quien creo el reporte,
+  siempre que sea coordinador. Si lo creo un apr, o el coordinador
+  todavia no tiene firma cargada, esa celda queda en blanco. Requiere la
+  migracion add_firma_usuarios.sql (agrega usuarios.firma_url y carga la
+  de Ericson Ramirez). Administrador Contrato (Sara Cofre) sigue fijo.
+---
+ add_firma_usuarios.sql                        |  40 +++++
+ .../ParteDiario/ParteDiarioForm.tsx           |  51 +++----
+ src/lib/generarExcelParteDiario.ts            | 141 +++++++++++++-----
+ src/lib/supabase.ts                           |   4 +-
+ src/types/index.ts                            |   6 +
+ 5 files changed, 174 insertions(+), 68 deletions(-)
+ create mode 100644 add_firma_usuarios.sql
+
+diff --git a/add_firma_usuarios.sql b/add_firma_usuarios.sql
+new file mode 100644
+index 0000000..08feb10
+--- /dev/null
++++ b/add_firma_usuarios.sql
+@@ -0,0 +1,40 @@
++-- ============================================================
++-- Firma digital por usuario (Daily Report).
++--
++-- Antes, el nombre "Ericson Ramirez" en el bloque de firma del Excel
++-- (Coordinador de Terreno) venía escrito fijo en la propia plantilla
++-- (DR000_12501191.xlsx) — el mismo nombre salía siempre, sin importar
++-- quién hubiera creado el reporte. Con esta columna, generarExcelParteDiario()
++-- usa el nombre y la firma_url de quien de verdad creó el reporte
++-- (parte.usuario_creador), siempre que tenga rol coordinador — así cada
++-- coordinador firma con su propio nombre e imagen. Si el creador es un
++-- apr, o es coordinador pero todavía no tiene firma_url, esa celda queda
++-- en blanco (sin firma) en vez de mostrar un nombre que no corresponde.
++--
++-- La imagen de la firma NO se sube a Storage: se sirve como archivo
++-- estático desde public/firmas/ (mismo mecanismo ya usado para Ericson/
++-- Sara) y acá solo se guarda la ruta. Para agregar la firma de un nuevo
++-- coordinador:
++--   1. Colocar su imagen en public/firmas/ (ej: public/firmas/nombre.png)
++--      y hacer deploy.
++--   2. Correr un UPDATE como el de más abajo, con su email y esa ruta.
++-- "Administrador Contrato" (Sara Cofré) sigue fija por ahora, no usa esta
++-- columna.
++-- ============================================================
++
++alter table public.usuarios add column if not exists firma_url text;
++
++comment on column public.usuarios.firma_url is
++  'Ruta pública de la imagen de firma digital del usuario (ej: /firmas/ericson-ramirez.png). Se usa en el Daily Report en Excel para coordinadores. NULL = sin firma cargada todavía.';
++
++-- Firma de Ericson Ramirez (ya estaba cargada como firma fija en el Excel
++-- desde antes de esta migración — acá solo se formaliza en la tabla).
++update public.usuarios
++set firma_url = '/firmas/ericson-ramirez.png'
++where email = 'ericsonramirezm@gmail.com';
++
++-- Cuando llegue la firma del otro coordinador, agregar su imagen en
++-- public/firmas/ y descomentar/adaptar esto:
++-- update public.usuarios
++-- set firma_url = '/firmas/NOMBRE-DEL-ARCHIVO.png'
++-- where email = 'EMAIL_DEL_OTRO_COORDINADOR';
+diff --git a/src/components/ParteDiario/ParteDiarioForm.tsx b/src/components/ParteDiario/ParteDiarioForm.tsx
+index 76fb7e4..78e3a7b 100644
+--- a/src/components/ParteDiario/ParteDiarioForm.tsx
++++ b/src/components/ParteDiario/ParteDiarioForm.tsx
+@@ -26,11 +26,17 @@ const MAX_ACTIVIDADES = 7
+ 
+ const actividadVacia = (): ActividadEjecutada => ({ area: '', descripcion: '', cantidad: null })
+ 
++// El campo "Cantidad" de Actividades Ejecutadas ahora guarda las HH que
++// dura esa actividad en particular (ej: 0,5) — no una cantidad de items.
++// Las HH de Fuerza laboral directa por actividad se calculan solas a
++// partir de eso: cantidad (HH x actividad) × operativos del cargo (ej:
++// actividad 1 dura 0,5 → cada técnico operativo suma 0,5 HH en esa
++// columna). Por eso FilaManoObraDirecta ya no guarda "horas" como estado
++// propio — se deriva en cada render con calcularHorasCargo() más abajo.
+ interface FilaManoObraDirecta {
+   cargo: string
+   contratados: number
+   operativos: number
+-  horas: number[]
+ }
+ 
+ interface FilaManoObraIndirecta {
+@@ -77,7 +83,6 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
+         cargo,
+         contratados: existente?.contratados ?? 0,
+         operativos: existente?.operativos ?? 0,
+-        horas: existente?.horas_por_actividad ? [...existente.horas_por_actividad] : [],
+       }
+     })
+   )
+@@ -173,16 +178,14 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
+       prev.map((f, i) => (i === index ? { ...f, [campo]: Number(valor) || 0 } : f))
+     )
+   }
+-  const actualizarHorasDirecta = (index: number, actIndex: number, valor: string) => {
+-    setManoObraDirecta((prev) =>
+-      prev.map((f, i) => {
+-        if (i !== index) return f
+-        const horas = [...f.horas]
+-        horas[actIndex] = Number(valor) || 0
+-        return { ...f, horas }
+-      })
+-    )
+-  }
++
++  // HH de un cargo en cada actividad = HH que dura la actividad (el
++  // "Cantidad" de Actividades Ejecutadas) × operativos de ese cargo. Ya no
++  // se tipea a mano por celda — se deriva de esos dos valores en cada
++  // render, así que si cualquiera de los dos cambia, la tabla se
++  // actualiza sola.
++  const calcularHorasCargo = (fila: FilaManoObraDirecta): number[] =>
++    actividades.slice(0, numActividades).map((act) => (act.cantidad ?? 0) * fila.operativos)
+ 
+   // ---------- Mano de obra indirecta ----------
+   const actualizarIndirecta = (index: number, campo: 'contratados' | 'operativos', valor: string) => {
+@@ -211,7 +214,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
+   }
+ 
+   // ---------- Totales calculados (mismas fórmulas que el Excel) ----------
+-  const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(f.horas.slice(0, numActividades))))
++  const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(calcularHorasCargo(f))))
+   const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => 11 * f.operativos))
+   const totalHm = sumar(maquinaria.map((f) => sumar(f.horas.slice(0, numActividades))))
+ 
+@@ -233,7 +236,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
+           cargo: f.cargo,
+           contratados: f.contratados,
+           operativos: f.operativos,
+-          horas_por_actividad: f.horas.slice(0, numActividades),
++          horas_por_actividad: calcularHorasCargo(f),
+         })),
+         mano_obra_indirecta: manoObraIndirecta.map((f) => ({
+           cargo: f.cargo,
+@@ -407,7 +410,9 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
+               />
+               <input
+                 type="number"
+-                placeholder="Cantidad"
++                step="0.1"
++                placeholder="HH x actividad"
++                title="Horas que dura esta actividad en particular (ej: 0,5) — se usa para calcular las HH de Fuerza laboral directa."
+                 value={actividad.cantidad ?? ''}
+                 onChange={(e) => actualizarActividad(index, 'cantidad', e.target.value)}
+                 className={inputNumClase}
+@@ -432,7 +437,8 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
+           Fuerza laboral directa
+         </h3>
+         <p className="text-xs text-slate-400 mb-3">
+-          Horas por actividad — solo se muestran columnas para las {numActividades} actividad(es) cargadas arriba.
++          Las columnas Act.1..Act.{numActividades} se calculan solas: HH x actividad (campo "Cantidad" de
++          Actividades Ejecutadas) × Operativos de cada cargo.
+         </p>
+         <div className="overflow-x-auto">
+           <table className="w-full text-sm min-w-[640px]">
+@@ -473,18 +479,13 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
+                   <td className="py-1 px-1 text-right text-slate-400 font-mono text-xs">
+                     {fila.contratados - fila.operativos}
+                   </td>
+-                  {Array.from({ length: numActividades }).map((_, actIndex) => (
+-                    <td key={actIndex} className="py-1 px-1">
+-                      <input
+-                        type="number"
+-                        value={fila.horas[actIndex] || ''}
+-                        onChange={(e) => actualizarHorasDirecta(index, actIndex, e.target.value)}
+-                        className={inputNumClase}
+-                      />
++                  {calcularHorasCargo(fila).map((horas, actIndex) => (
++                    <td key={actIndex} className="py-1 px-1 text-right font-mono text-xs text-slate-500">
++                      {horas || ''}
+                     </td>
+                   ))}
+                   <td className="py-1 pl-1 text-right font-mono text-xs text-slate-500">
+-                    {sumar(fila.horas.slice(0, numActividades))}
++                    {sumar(calcularHorasCargo(fila))}
+                   </td>
+                 </tr>
+               ))}
+diff --git a/src/lib/generarExcelParteDiario.ts b/src/lib/generarExcelParteDiario.ts
+index d4b2d76..98ae5df 100644
+--- a/src/lib/generarExcelParteDiario.ts
++++ b/src/lib/generarExcelParteDiario.ts
+@@ -1,6 +1,6 @@
+ import ExcelJS from 'exceljs'
+ import JSZip from 'jszip'
+-import { ParteDiario } from '@/types/index'
++import { ParteDiario, UserRole } from '@/types/index'
+ 
+ // Genera el Daily Report en Excel EXACTAMENTE con el formato original: se
+ // abre la plantilla en blanco (public/plantillas/DR000_12501191.xlsx, la
+@@ -71,21 +71,37 @@ function redondearEsquinasFotos(xmlDrawing: string, numFotos: number): string {
+ // ---------- Firmas digitales (hojas "DR" e "Imágenes") ----------
+ // El bloque de firma de la plantilla (fila "Firma", justo debajo de
+ // "Nombre:") es igual en las dos hojas — la hoja "Imágenes" lo repite 4
+-// filas más arriba que la hoja "DR". "Coordinador de Terreno" y
+-// "Administrador Contrato" ya vienen con nombre fijo en la plantilla
+-// (Ericson Ramirez / Sara Cofré); "Responsable Mandante" queda en blanco
++// filas más arriba que la hoja "DR".
++//
++// "Coordinador de Terreno" es dinámico: se usa el nombre y la firma_url
++// de quien creó el reporte (parte.usuario_creador), SOLO si ese usuario
++// tiene rol coordinador — así cada coordinador firma con su propio
++// nombre e imagen al generar el Excel, en vez del nombre fijo que traía
++// la plantilla (antes siempre decía "Ericson Ramirez", venía escrito en
++// el archivo de la plantilla, no lo ponía el código). Si el reporte lo
++// creó un apr, o el coordinador todavía no tiene firma_url cargada en la
++// tabla usuarios (ver add_firma_usuarios.sql), esa celda queda en blanco
++// y no se inserta imagen — mejor eso que atribuirle mal una firma.
++//
++// "Administrador Contrato" (Sara Cofré) sigue fija por ahora — no se
++// pidió que varíe por usuario. "Responsable Mandante" queda en blanco
+ // porque lo firma el mandante por su cuenta, no acá.
+ //
+ // La hoja "DR" restaura su drawing completo desde la plantilla (ver
+ // PARTES_GRAFICO, por el gráfico) — insertar ahí una imagen con la API de
+ // ExcelJS (workbook.addImage) se perdería en esa restauración. Por eso las
+-// dos firmas se inyectan directamente en el XML del drawing de cada hoja,
+-// con el mismo mecanismo que ya se usa para el gráfico y las esquinas
++// firmas se inyectan directamente en el XML del drawing de cada hoja, con
++// el mismo mecanismo que ya se usa para el gráfico y las esquinas
+ // redondeadas, en vez de con addImage.
+-const FIRMA_ERICSON_URL = '/firmas/ericson-ramirez.png'
+ const FIRMA_SARA_URL = '/firmas/sara-cofre.png'
+-const FIRMA_ERICSON_MEDIA = 'firma-ericson-ramirez.png'
+ const FIRMA_SARA_MEDIA = 'firma-sara-cofre.png'
++const FIRMA_COORDINADOR_MEDIA = 'firma-coordinador.png'
++
++// Celda con el nombre del Coordinador de Terreno en la hoja "DR" — la
++// hoja "Imágenes" no necesita que la toquemos: su celda equivalente
++// (C90) ya es la fórmula "=+DR!C94" en la plantilla, así que sigue a
++// esta automáticamente al recalcular.
++const CELDA_NOMBRE_COORDINADOR = 'C94'
+ 
+ // Fila (índice 0 de OOXML, o sea fila de Excel menos 1) de la etiqueta
+ // "Firma" en cada hoja.
+@@ -105,11 +121,18 @@ interface CajaFirma {
+   rowOffIni: number
+   rowOffFin: number
+ }
+-// Columna C (bajo "Firma" del Coordinador de Terreno / Ericson Ramirez).
+-const CAJA_FIRMA_ERICSON: CajaFirma = { col: 2, colOffIni: 30000, colOffFin: 417931, rowOffIni: 63360, rowOffFin: 363360 }
++// Columna C (bajo "Firma" del Coordinador de Terreno).
++const CAJA_FIRMA_COORDINADOR: CajaFirma = { col: 2, colOffIni: 30000, colOffFin: 417931, rowOffIni: 63360, rowOffFin: 363360 }
+ // Columna G (bajo "Firma" del Administrador Contrato / Sara Cofré).
+ const CAJA_FIRMA_SARA: CajaFirma = { col: 6, colOffIni: 30000, colOffFin: 433846, rowOffIni: 63360, rowOffFin: 363360 }
+ 
++interface FirmaAInsertar {
++  caja: CajaFirma
++  nombre: string // solo para el name= del shape, no se muestra en pantalla
++  mediaFileName: string
++  buffer: ArrayBuffer
++}
++
+ function xmlAnclaFirma(caja: CajaFirma, fila: number, picId: number, nombre: string, rId: string): string {
+   return (
+     '<xdr:twoCellAnchor editAs="oneCell">' +
+@@ -137,32 +160,36 @@ function siguienteId(xml: string, patron: RegExp): number {
+   return max + 1
+ }
+ 
+-function agregarFirmasAlDrawing(xmlDrawing: string, xmlRels: string, fila: number): { drawing: string; rels: string } {
+-  const rIdInicial = siguienteId(xmlRels, /Id="rId(\d+)"/g)
+-  const rIdEricson = `rId${rIdInicial}`
+-  const rIdSara = `rId${rIdInicial + 1}`
+-
+-  const idInicial = siguienteId(xmlDrawing, /<xdr:cNvPr id="(\d+)"/g)
++// firmas puede traer 1 o 2 elementos: Sara siempre, más el Coordinador
++// solo si el reporte tiene un creador coordinador con firma_url cargada
++// (ver generarExcelParteDiario). Si viene vacío no se toca el drawing.
++function agregarFirmasAlDrawing(xmlDrawing: string, xmlRels: string, fila: number, firmas: FirmaAInsertar[]): { drawing: string; rels: string; media: { nombre: string; buffer: ArrayBuffer }[] } {
++  if (firmas.length === 0) return { drawing: xmlDrawing, rels: xmlRels, media: [] }
++
++  let rIdSiguiente = siguienteId(xmlRels, /Id="rId(\d+)"/g)
++  let idSiguiente = siguienteId(xmlDrawing, /<xdr:cNvPr id="(\d+)"/g)
++
++  let anclas = ''
++  let nuevasRelaciones = ''
++  const media: { nombre: string; buffer: ArrayBuffer }[] = []
++  for (const firma of firmas) {
++    const rId = `rId${rIdSiguiente++}`
++    anclas += xmlAnclaFirma(firma.caja, fila, idSiguiente++, firma.nombre, rId)
++    nuevasRelaciones += `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${firma.mediaFileName}"/>`
++    media.push({ nombre: firma.mediaFileName, buffer: firma.buffer })
++  }
+ 
+-  const anclas =
+-    xmlAnclaFirma(CAJA_FIRMA_ERICSON, fila, idInicial, 'Firma Ericson Ramirez', rIdEricson) +
+-    xmlAnclaFirma(CAJA_FIRMA_SARA, fila, idInicial + 1, 'Firma Sara Cofré', rIdSara)
+   const drawing = xmlDrawing.replace('</xdr:wsDr>', `${anclas}</xdr:wsDr>`)
+-
+-  const nuevasRelaciones =
+-    `<Relationship Id="${rIdEricson}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${FIRMA_ERICSON_MEDIA}"/>` +
+-    `<Relationship Id="${rIdSara}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${FIRMA_SARA_MEDIA}"/>`
+   const rels = xmlRels.replace('</Relationships>', `${nuevasRelaciones}</Relationships>`)
+-
+-  return { drawing, rels }
++  return { drawing, rels, media }
+ }
+ 
+ async function posprocesarExcel(
+   bufferGenerado: ArrayBuffer,
+   bufferPlantilla: ArrayBuffer,
+   numFotosInsertadas: number,
+-  firmaEricsonBuffer: ArrayBuffer,
+-  firmaSaraBuffer: ArrayBuffer
++  firmaSaraBuffer: ArrayBuffer,
++  firmaCoordinadorBuffer: ArrayBuffer | null
+ ): Promise<Blob> {
+   const [zipGenerado, zipPlantilla] = await Promise.all([JSZip.loadAsync(bufferGenerado), JSZip.loadAsync(bufferPlantilla)])
+ 
+@@ -189,26 +216,40 @@ async function posprocesarExcel(
+   if (drawing2) zipGenerado.file(drawing2Path, redondearEsquinasFotos(drawing2, numFotosInsertadas))
+ 
+   // ---- 3. Firmas digitales (hojas DR e Imágenes) ----
+-  zipGenerado.file(`xl/media/${FIRMA_ERICSON_MEDIA}`, new Uint8Array(firmaEricsonBuffer))
+-  zipGenerado.file(`xl/media/${FIRMA_SARA_MEDIA}`, new Uint8Array(firmaSaraBuffer))
++  const firmasParaCaja = (cajaCoordinador: CajaFirma, cajaSara: CajaFirma): FirmaAInsertar[] => {
++    const firmas: FirmaAInsertar[] = [
++      { caja: cajaSara, nombre: 'Firma Administrador Contrato', mediaFileName: FIRMA_SARA_MEDIA, buffer: firmaSaraBuffer },
++    ]
++    if (firmaCoordinadorBuffer) {
++      firmas.push({
++        caja: cajaCoordinador,
++        nombre: 'Firma Coordinador de Terreno',
++        mediaFileName: FIRMA_COORDINADOR_MEDIA,
++        buffer: firmaCoordinadorBuffer,
++      })
++    }
++    return firmas
++  }
+ 
+   const drawing1Path = 'xl/drawings/drawing1.xml'
+   const drawing1RelsPath = 'xl/drawings/_rels/drawing1.xml.rels'
+   const drawing1 = await zipGenerado.file(drawing1Path)?.async('string')
+   const drawing1Rels = await zipGenerado.file(drawing1RelsPath)?.async('string')
+   if (drawing1 && drawing1Rels) {
+-    const { drawing, rels } = agregarFirmasAlDrawing(drawing1, drawing1Rels, FILA_FIRMA_DR)
++    const { drawing, rels, media } = agregarFirmasAlDrawing(drawing1, drawing1Rels, FILA_FIRMA_DR, firmasParaCaja(CAJA_FIRMA_COORDINADOR, CAJA_FIRMA_SARA))
+     zipGenerado.file(drawing1Path, drawing)
+     zipGenerado.file(drawing1RelsPath, rels)
++    for (const m of media) zipGenerado.file(`xl/media/${m.nombre}`, new Uint8Array(m.buffer))
+   }
+ 
+   const drawing2RelsPath = 'xl/drawings/_rels/drawing2.xml.rels'
+   const drawing2ConEsquinas = await zipGenerado.file(drawing2Path)?.async('string')
+   const drawing2Rels = await zipGenerado.file(drawing2RelsPath)?.async('string')
+   if (drawing2ConEsquinas && drawing2Rels) {
+-    const { drawing, rels } = agregarFirmasAlDrawing(drawing2ConEsquinas, drawing2Rels, FILA_FIRMA_IMAGENES)
++    const { drawing, rels, media } = agregarFirmasAlDrawing(drawing2ConEsquinas, drawing2Rels, FILA_FIRMA_IMAGENES, firmasParaCaja(CAJA_FIRMA_COORDINADOR, CAJA_FIRMA_SARA))
+     zipGenerado.file(drawing2Path, drawing)
+     zipGenerado.file(drawing2RelsPath, rels)
++    for (const m of media) zipGenerado.file(`xl/media/${m.nombre}`, new Uint8Array(m.buffer))
+   }
+ 
+   return zipGenerado.generateAsync({ type: 'blob' })
+@@ -364,6 +405,16 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+   if (parte.comentario_mandante_autor) hojaDR.getCell('B88').value = parte.comentario_mandante_autor
+   if (parte.comentario_mandante) hojaDR.getCell('D88').value = parte.comentario_mandante
+ 
++  // ---------- Coordinador de Terreno (nombre) ----------
++  // La plantilla trae "Ericson Ramirez" fijo en esta celda; se sobrescribe
++  // acá con quien de verdad creó el reporte, SI es coordinador — si lo
++  // creó un apr, se deja en blanco (nadie ha firmado como coordinador
++  // todavía). La firma (imagen) se resuelve más abajo junto con la de
++  // Sara Cofré, y se inserta en posprocesarExcel().
++  const creador = parte.usuario_creador
++  const creadorEsCoordinador = creador?.rol === UserRole.COORDINADOR
++  hojaDR.getCell(CELDA_NOMBRE_COORDINADOR).value = creadorEsCoordinador ? creador!.nombre : ''
++
+   // ---------- Fotos (hoja "Imágenes") ----------
+   // Grilla de 3 columnas repartida simétricamente en B7:N88 — ver
+   // calcularCeldaFoto() más arriba. Las esquinas redondeadas se agregan
+@@ -401,19 +452,27 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+     }
+   }
+ 
+-  // ---------- Firmas digitales (Coordinador de Terreno / Administrador
+-  // Contrato) — se insertan en posprocesarExcel(), ver comentario ahí.
+-  const [respFirmaEricson, respFirmaSara] = await Promise.all([fetch(FIRMA_ERICSON_URL), fetch(FIRMA_SARA_URL)])
+-  if (!respFirmaEricson.ok || !respFirmaSara.ok) {
+-    throw new Error('No se pudieron cargar las imágenes de firma')
++  // ---------- Firmas digitales (Administrador Contrato / Coordinador de
++  // Terreno) — se insertan en posprocesarExcel(), ver comentario ahí. La
++  // de Sara Cofré (Administrador Contrato) es fija y siempre se agrega; la
++  // del Coordinador de Terreno depende de si el creador del reporte es
++  // coordinador y ya tiene firma_url cargada (ver arriba).
++  const respFirmaSara = await fetch(FIRMA_SARA_URL)
++  if (!respFirmaSara.ok) throw new Error('No se pudo cargar la imagen de firma de Administrador Contrato')
++  const firmaSaraBuffer = await respFirmaSara.arrayBuffer()
++
++  let firmaCoordinadorBuffer: ArrayBuffer | null = null
++  if (creadorEsCoordinador && creador?.firma_url) {
++    const respFirmaCoordinador = await fetch(creador.firma_url)
++    if (respFirmaCoordinador.ok) {
++      firmaCoordinadorBuffer = await respFirmaCoordinador.arrayBuffer()
++    } else {
++      console.error('No se pudo cargar la imagen de firma del coordinador:', creador.firma_url)
++    }
+   }
+-  const [firmaEricsonBuffer, firmaSaraBuffer] = await Promise.all([
+-    respFirmaEricson.arrayBuffer(),
+-    respFirmaSara.arrayBuffer(),
+-  ])
+ 
+   const bufferGenerado = await workbook.xlsx.writeBuffer()
+-  return posprocesarExcel(bufferGenerado, buffer, fotosInsertadas, firmaEricsonBuffer, firmaSaraBuffer)
++  return posprocesarExcel(bufferGenerado, buffer, fotosInsertadas, firmaSaraBuffer, firmaCoordinadorBuffer)
+ }
+ 
+ export function nombreArchivoParteDiario(parte: ParteDiario): string {
+diff --git a/src/lib/supabase.ts b/src/lib/supabase.ts
+index 61fef4f..71be056 100644
+--- a/src/lib/supabase.ts
++++ b/src/lib/supabase.ts
+@@ -425,7 +425,7 @@ export const db = {
+     // se asigna con obtener_siguiente_numero_parte() al crear cada uno.
+     const { data, error } = await supabase
+       .from('partes_diarios')
+-      .select('*, usuario_creador:creado_por(nombre, email, rol)')
++      .select('*, usuario_creador:creado_por(nombre, email, rol, firma_url)')
+       .eq('contrato_id', contratoId)
+       .order('numero_reporte', { ascending: false })
+ 
+@@ -436,7 +436,7 @@ export const db = {
+   async obtenerParteDiario(id: string) {
+     const { data, error } = await supabase
+       .from('partes_diarios')
+-      .select('*, usuario_creador:creado_por(nombre, email, rol)')
++      .select('*, usuario_creador:creado_por(nombre, email, rol, firma_url)')
+       .eq('id', id)
+       .single()
+ 
+diff --git a/src/types/index.ts b/src/types/index.ts
+index 61e2dc8..466cd03 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -59,6 +59,12 @@ export interface Usuario {
+   estado: UserStatus;
+   created_at: string;
+   updated_at: string;
++  // Ruta de la imagen de firma digital de este usuario (ver
++  // add_firma_usuarios.sql) — la usa el Daily Report en Excel para que
++  // cada Coordinador de Terreno firme con su propio nombre e imagen, en
++  // vez de un nombre fijo. Puede no existir todavía (coordinador sin
++  // firma cargada aún).
++  firma_url?: string;
+ }
+ 
+ export interface Contrato {
+-- 
+2.43.0
+

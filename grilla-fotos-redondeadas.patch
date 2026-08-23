@@ -1,0 +1,198 @@
+From 66c22e30ed2085f33d0b8480559e78f5ecb75251 Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sat, 22 Aug 2026 22:52:44 +0000
+Subject: [PATCH] Reorganiza las fotos del Excel en una grilla simetrica con
+ esquinas redondeadas
+
+Comparando el Excel generado por la app contra uno armado a mano, las
+fotos quedaban apiladas en una sola columna con tamano fijo en pixeles,
+sin redondeo. Ahora:
+
+- Grilla de 3 columnas repartida simetricamente en el rango B7:N88 (igual
+  de ancha en cada franja), con el alto de fila fijo en vez de calculado
+  segun el total -- 1 o 2 fotos se ven en su tamano natural, no
+  gigantes estiradas; con 9 o mas sigue agregando filas hacia abajo en
+  vez de encoger las tarjetas.
+- Cada foto usa un twoCellAnchor con coordenadas fraccionarias (como al
+  arrastrar una imagen a mano dentro de un rango de celdas en Excel) en
+  vez de un tamano fijo en pixeles, para que se ajuste al ancho real de
+  las columnas.
+- Esquinas redondeadas (prstGeom roundRect, radio 16667 -- el mismo que
+  usa el estilo nativo de Office) via post-procesado del XML del dibujo,
+  ya que ExcelJS no expone esa opcion en su API. Los logos del
+  encabezado no se tocan.
+- Pie de foto reposicionado para no quedar tapado por la tarjeta
+  siguiente.
+
+Probado en navegador real (Playwright) con 1, 2, 7 y 9 fotos, y
+verificado visualmente convirtiendo a PDF con LibreOffice -- sin
+superposiciones, esquinas redondeadas visibles, grilla simetrica.
+---
+ src/lib/generarExcelParteDiario.ts | 112 ++++++++++++++++++++++++-----
+ 1 file changed, 96 insertions(+), 16 deletions(-)
+
+diff --git a/src/lib/generarExcelParteDiario.ts b/src/lib/generarExcelParteDiario.ts
+index 9a019f5..54c36f1 100644
+--- a/src/lib/generarExcelParteDiario.ts
++++ b/src/lib/generarExcelParteDiario.ts
+@@ -31,9 +31,37 @@ const PARTES_GRAFICO = [
+   'xl/drawings/_rels/drawing1.xml.rels',
+ ]
+ 
+-async function restaurarGraficoOriginal(bufferGenerado: ArrayBuffer, bufferPlantilla: ArrayBuffer): Promise<Blob> {
++// Cuántas anclas de imagen (xdr:oneCellAnchor / xdr:twoCellAnchor) trae la
++// hoja "Imágenes" de la PLANTILLA en blanco, antes de que nuestro código
++// agregue ninguna foto: los 2 logos del encabezado. ExcelJS conserva esas
++// anclas tal cual y solo AGREGA anclas nuevas al final por cada
++// hojaImagenes.addImage() que hacemos — por eso, en el XML ya generado,
++// las primeras N_ANCLAS_PLANTILLA anclas son siempre esos logos y el resto
++// son las fotos del reporte, sin importar si terminamos usando
++// oneCellAnchor o twoCellAnchor para insertarlas.
++const N_ANCLAS_PLANTILLA_IMAGENES = 2
++
++// Redondea las esquinas de las fotos insertadas (no las del logo): ExcelJS
++// no tiene forma de pedir esto por API, así que se edita el XML del dibujo
++// directamente después de generarlo (mismo mecanismo que restaurarGraficoOriginal
++// usa para el gráfico). 16667 es el radio de esquina que usa por defecto el
++// estilo "Rectángulo redondeado" nativo de Office.
++function redondearEsquinasFotos(xmlDrawing: string): string {
++  let contador = 0
++  return xmlDrawing.replace(/<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g, (bloque) => {
++    contador += 1
++    if (contador <= N_ANCLAS_PLANTILLA_IMAGENES) return bloque
++    return bloque.replace(
++      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
++      '<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val 16667"/></a:avLst></a:prstGeom>'
++    )
++  })
++}
++
++async function posprocesarExcel(bufferGenerado: ArrayBuffer, bufferPlantilla: ArrayBuffer): Promise<Blob> {
+   const [zipGenerado, zipPlantilla] = await Promise.all([JSZip.loadAsync(bufferGenerado), JSZip.loadAsync(bufferPlantilla)])
+ 
++  // ---- 1. Restaurar el gráfico "Programado vs. Real" (hoja DR) ----
+   for (const parte of PARTES_GRAFICO) {
+     const original = zipPlantilla.file(parte)
+     if (original) zipGenerado.file(parte, await original.async('uint8array'))
+@@ -50,8 +78,12 @@ async function restaurarGraficoOriginal(bufferGenerado: ArrayBuffer, bufferPlant
+     zipGenerado.file(contentTypesPath, contentTypes.replace('</Types>', `${override}</Types>`))
+   }
+ 
+-  const bufferFinal = await zipGenerado.generateAsync({ type: 'blob' })
+-  return bufferFinal
++  // ---- 2. Esquinas redondeadas en las fotos (hoja Imágenes) ----
++  const drawing2Path = 'xl/drawings/drawing2.xml'
++  const drawing2 = await zipGenerado.file(drawing2Path)?.async('string')
++  if (drawing2) zipGenerado.file(drawing2Path, redondearEsquinasFotos(drawing2))
++
++  return zipGenerado.generateAsync({ type: 'blob' })
+ }
+ 
+ // Filas fijas en la hoja "DR", en el mismo orden que CARGOS_DIRECTOS /
+@@ -72,6 +104,52 @@ function horaATiempoExcel(hora: string | null | undefined): Date | null {
+   return new Date(Date.UTC(1899, 11, 30, h, m))
+ }
+ 
++// ---------- Grilla de fotos (hoja "Imágenes") ----------
++// Grilla de 3 columnas, distribuida simétricamente dentro del rango B7:N88
++// (columnas 1 a 13 y desde la fila 7 en índice 0, que es como ExcelJS
++// cuenta col/row). La altura de cada fila de la grilla es fija (pensada
++// para que 3 filas — 9 fotos — llenen justo hasta la fila 88, como en el
++// diseño de referencia); si hay más de 9 fotos, la grilla sigue agregando
++// filas hacia abajo en vez de achicar las tarjetas para que "quepan
++// igual" — con pocas fotos (1 o 2) se ven del mismo tamaño natural que
++// con 9, no gigantes estiradas ocupando toda la hoja. Cada foto usa un
++// twoCellAnchor (con coordenadas fraccionarias tipo "col: 1.15") en vez
++// de un tamaño fijo en píxeles, para que el recuadro se ajuste al ancho
++// real de las columnas — igual a como queda al insertar imágenes a mano
++// en Excel arrastrándolas dentro de un rango de celdas.
++const GRILLA_COL_INICIO = 1 // columna B
++const GRILLA_COL_FIN = 13 // columna N
++const GRILLA_FILA_INICIO = 7 // fila 8 (deja la fila 7 como encabezado de la sección)
++const GRILLA_COLUMNAS = 3
++const GRILLA_ALTURA_BANDA = 26 // alto fijo de cada fila de la grilla — 3 filas ≈ hasta la fila 88
++const GRILLA_MARGEN = 0.15 // espacio entre tarjetas, en unidades de celda
++const GRILLA_ALTURA_LEYENDA = 2.2 // filas reservadas bajo la foto para el pie de foto
++
++function calcularCeldaFoto(index: number) {
++  const col = index % GRILLA_COLUMNAS
++  const fila = Math.floor(index / GRILLA_COLUMNAS)
++
++  const anchoColumna = (GRILLA_COL_FIN - GRILLA_COL_INICIO) / GRILLA_COLUMNAS
++
++  const tlCol = GRILLA_COL_INICIO + col * anchoColumna + GRILLA_MARGEN
++  const brCol = GRILLA_COL_INICIO + (col + 1) * anchoColumna - GRILLA_MARGEN
++  const tlRow = GRILLA_FILA_INICIO + fila * GRILLA_ALTURA_BANDA + GRILLA_MARGEN
++  const brRowFoto = GRILLA_FILA_INICIO + (fila + 1) * GRILLA_ALTURA_BANDA - GRILLA_MARGEN - GRILLA_ALTURA_LEYENDA
++
++  // Fila (índice 0) donde va el pie de foto: la primera fila completa
++  // después del recuadro de la foto, pero antes de que empiece la fila
++  // siguiente de la grilla (que ya arranca a los GRILLA_MARGEN de acá) —
++  // si no, la foto de abajo tapa visualmente el texto del pie de foto.
++  const filaLeyenda = Math.ceil(brRowFoto)
++
++  return {
++    tl: { col: tlCol, row: tlRow },
++    br: { col: brCol, row: brRowFoto },
++    filaLeyenda,
++    colLeyenda: Math.floor(tlCol),
++  }
++}
++
+ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob> {
+   const respuesta = await fetch(PLANTILLA_URL)
+   if (!respuesta.ok) throw new Error('No se pudo cargar la plantilla del Excel')
+@@ -159,11 +237,13 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+   if (parte.comentario_mandante) hojaDR.getCell('D88').value = parte.comentario_mandante
+ 
+   // ---------- Fotos (hoja "Imágenes") ----------
+-  // Grilla simple, una foto por bloque de filas — no reproduce un layout
+-  // manual, solo deja las fotos del día insertadas y legibles con su pie
+-  // de foto. Se puede refinar el layout más adelante.
+-  let filaFoto = 8
+-  for (const foto of parte.fotos) {
++  // Grilla de 3 columnas repartida simétricamente en B7:N88 — ver
++  // calcularCeldaFoto() más arriba. Las esquinas redondeadas se agregan
++  // después, en posprocesarExcel(), porque ExcelJS no expone esa opción
++  // en su API de addImage.
++  const fotosValidas = parte.fotos.slice(0, GRILLA_COLUMNAS * 20) // límite defensivo, no debería alcanzarse en uso normal
++  for (let i = 0; i < fotosValidas.length; i++) {
++    const foto = fotosValidas[i]
+     try {
+       const respFoto = await fetch(foto.url)
+       if (!respFoto.ok) continue
+@@ -172,23 +252,23 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
+       const extension = urlSinQuery.endsWith('.png') ? 'png' : 'jpeg'
+       const imageId = workbook.addImage({ buffer: bufferFoto as any, extension })
+ 
+-      hojaImagenes.addImage(imageId, {
+-        tl: { col: 1, row: filaFoto - 1 },
+-        ext: { width: 320, height: 220 },
+-      })
++      const celda = calcularCeldaFoto(i)
++      // Los tipos de ExcelJS piden una instancia completa de su clase Anchor
++      // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
++      // objetos planos {col, row} sin problema — es un typing de ExcelJS
++      // más estricto que su propio comportamiento real.
++      hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br } as any)
+ 
+       if (foto.caption) {
+-        hojaImagenes.getCell(`B${filaFoto + 11}`).value = foto.caption
++        hojaImagenes.getRow(celda.filaLeyenda + 1).getCell(celda.colLeyenda + 1).value = foto.caption
+       }
+     } catch (err) {
+       console.error('No se pudo insertar una foto en el Excel:', err)
+-    } finally {
+-      filaFoto += 13
+     }
+   }
+ 
+   const bufferGenerado = await workbook.xlsx.writeBuffer()
+-  return restaurarGraficoOriginal(bufferGenerado, buffer)
++  return posprocesarExcel(bufferGenerado, buffer)
+ }
+ 
+ export function nombreArchivoParteDiario(parte: ParteDiario): string {
+-- 
+2.43.0
+

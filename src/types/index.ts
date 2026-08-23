@@ -59,6 +59,12 @@ export interface Usuario {
   estado: UserStatus;
   created_at: string;
   updated_at: string;
+  // Ruta de la imagen de firma digital de este usuario (ver
+  // add_firma_usuarios.sql) — la usa el Daily Report en Excel para que
+  // cada Coordinador de Terreno firme con su propio nombre e imagen, en
+  // vez de un nombre fijo. Puede no existir todavía (coordinador sin
+  // firma cargada aún).
+  firma_url?: string;
 }
 
 export interface Contrato {

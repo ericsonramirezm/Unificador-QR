@@ -1,0 +1,62 @@
+From 649734e214a739b7e04305c1f0ff05952b6f789e Mon Sep 17 00:00:00 2001
+From: Ericson Ramirez <ericsonramirezm@gmail.com>
+Date: Sat, 22 Aug 2026 23:49:32 +0000
+Subject: [PATCH] Ordena los Daily Report por numero de reporte, no por fecha
+
+El listado y el calculo de acumulados de turno ordenaban por 'fecha',
+pero dos reportes pueden crearse fuera de orden respecto a su fecha real
+(un borrador atrasado que se envia despues, por ejemplo). El numero de
+reporte es correlativo y refleja el orden de creacion real, asi que es
+el criterio correcto para ambos casos:
+
+- obtenerPartesDiarios (listado): ahora ordena por numero_reporte desc.
+- obtenerUltimoParteDiario (base de los acumulados de turno al crear un
+  reporte nuevo): mismo cambio -- este era el mas delicado, porque si
+  tomaba el reporte equivocado como 'el ultimo', los acumulados del
+  reporte nuevo quedaban mal calculados.
+---
+ src/lib/supabase.ts | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/supabase.ts b/src/lib/supabase.ts
+index 68d1876..8f28645 100644
+--- a/src/lib/supabase.ts
++++ b/src/lib/supabase.ts
+@@ -370,11 +370,15 @@ export const db = {
+   // suma de todos los anteriores — así que el acumulado del parte nuevo es
+   // "el de este + lo que traiga este mismo objeto" (ver nota en la migración).
+   async obtenerUltimoParteDiario(contratoId: string) {
++    // Por número de reporte, no por fecha (ver obtenerPartesDiarios) —
++    // acá importa todavía más: si esto tomara el reporte equivocado como
++    // "el último", los acumulados de turno del reporte nuevo saldrían
++    // mal calculados.
+     const { data, error } = await supabase
+       .from('partes_diarios')
+       .select('hh_directas_acumuladas, hm_acumuladas, hh_indirectas_acumuladas')
+       .eq('contrato_id', contratoId)
+-      .order('fecha', { ascending: false })
++      .order('numero_reporte', { ascending: false })
+       .limit(1)
+       .maybeSingle()
+ 
+@@ -406,11 +410,16 @@ export const db = {
+   },
+ 
+   async obtenerPartesDiarios(contratoId: string) {
++    // Ordenado por número de reporte (no por fecha): dos reportes pueden
++    // crearse fuera de orden respecto a su fecha real (por ejemplo, un
++    // borrador atrasado que se envía después), y el número de reporte es
++    // el que de verdad refleja el orden de creación — es correlativo y
++    // se asigna con obtener_siguiente_numero_parte() al crear cada uno.
+     const { data, error } = await supabase
+       .from('partes_diarios')
+       .select('*, usuario_creador:creado_por(nombre, email, rol)')
+       .eq('contrato_id', contratoId)
+-      .order('fecha', { ascending: false })
++      .order('numero_reporte', { ascending: false })
+ 
+     if (error) throw error
+     return data
+-- 
+2.43.0
+

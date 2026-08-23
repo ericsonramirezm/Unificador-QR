@@ -29,9 +29,13 @@ comment on column public.usuarios.firma_url is
 
 -- Firma de Ericson Ramirez (ya estaba cargada como firma fija en el Excel
 -- desde antes de esta migración — acá solo se formaliza en la tabla).
+-- OJO: eramirez@wilug.cl es el correo con el que Ericson entra a
+-- Unificador QR (tabla usuarios) — no es el mismo que usa para otras
+-- cosas, así que si esto no encuentra ninguna fila, confirmar el email
+-- real en la tabla usuarios antes de asumir que es este.
 update public.usuarios
 set firma_url = '/firmas/ericson-ramirez.png'
-where email = 'ericsonramirezm@gmail.com';
+where email = 'eramirez@wilug.cl';
 
 -- Cuando llegue la firma del otro coordinador, agregar su imagen en
 -- public/firmas/ y descomentar/adaptar esto:

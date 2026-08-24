@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { db } from '@lib/supabase'
-import { FAENA_LABELS, ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
+import { FAENA_LABELS, HH_TURNO_POR_FAENA, ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
 import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
 import { puedeEditar, puedeEliminar } from './permisos'
 
@@ -15,6 +15,8 @@ interface ParteDiarioDetalleProps {
 
 const sumarHoras = (items: any[], campo: string) =>
   items.reduce((acc, item) => acc + (Array.isArray(item[campo]) ? item[campo].reduce((a: number, h: number) => a + (h || 0), 0) : 0), 0)
+
+const sumar = (valores: (number | null | undefined)[]) => valores.reduce((acc: number, v) => acc + (v || 0), 0)
 
 export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: ParteDiarioDetalleProps) => {
   const [parte, setParte] = useState<ParteDiario | null>(null)
@@ -96,7 +98,13 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: Par
 
   const totalHhDirectas = sumarHoras(parte.mano_obra_directa, 'horas_por_actividad')
   const totalHm = sumarHoras(parte.maquinaria, 'horas_por_actividad')
-  const totalHhIndirectas = parte.mano_obra_indirecta.reduce((acc, f) => acc + 11 * (f.operativos || 0), 0)
+  // Multiplicador por faena (antes hardcodeado en 11 acá — desincronizado
+  // del resto de la app, ver conversación del 2026-08-23 sobre la
+  // división de faenas).
+  const totalHhIndirectas = parte.mano_obra_indirecta.reduce(
+    (acc, f) => acc + HH_TURNO_POR_FAENA[parte.faena] * (f.operativos || 0),
+    0
+  )
 
   const puedeComentar =
     usuario.rol === UserRole.MANDANTE &&
@@ -166,6 +174,173 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: Par
             <p className="text-xs text-slate-400">Acum.: {parte.hh_indirectas_acumuladas ?? '—'}</p>
           </div>
         </div>
+
+        {/* ---------- Resumen (Jornada, Fuerza laboral, Maquinaria, HH Programadas) ---------- */}
+        <section>
+          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2">Jornada</h3>
+          {parte.jornada ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-xs text-slate-400">Inicio jornada</p>
+                <p className="text-slate-800 font-medium">{parte.jornada.inicio ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">Fin jornada</p>
+                <p className="text-slate-800 font-medium">{parte.jornada.fin ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">Horas efectivas</p>
+                <p className="text-slate-800 font-medium">
+                  {parte.jornada.horas_efectivas.entrada ?? '—'} – {parte.jornada.horas_efectivas.salida ?? '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">Horas perdidas</p>
+                <p className="text-slate-800 font-medium">
+                  {parte.jornada.horas_perdidas.entrada ?? '—'} – {parte.jornada.horas_perdidas.salida ?? '—'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">Sin jornada registrada.</p>
+          )}
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2">Fuerza laboral directa</h3>
+          {(() => {
+            const filas = parte.mano_obra_directa.filter((f) => (f.contratados || 0) > 0 || (f.operativos || 0) > 0)
+            if (filas.length === 0) {
+              return <p className="text-sm text-slate-400">No se registró fuerza laboral directa en este reporte.</p>
+            }
+            return (
+              <table className="w-full text-sm">
+                <thead className="text-xs text-slate-500 uppercase tracking-wide">
+                  <tr>
+                    <th className="text-left py-1">Cargo</th>
+                    <th className="text-right py-1">Contratados</th>
+                    <th className="text-right py-1">Operativos</th>
+                    <th className="text-right py-1">HH Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filas.map((f, i) => (
+                    <tr key={i}>
+                      <td className="py-1 text-slate-700">{f.cargo}</td>
+                      <td className="py-1 text-right text-slate-700">{f.contratados}</td>
+                      <td className="py-1 text-right text-slate-700">{f.operativos}</td>
+                      <td className="py-1 text-right font-medium text-slate-900">{sumar(f.horas_por_actividad ?? [])}</td>
+                    </tr>
+                  ))}
+                  <tr className="font-semibold border-t border-slate-200">
+                    <td className="py-1 text-slate-900" colSpan={3}>Total</td>
+                    <td className="py-1 text-right text-slate-900">{totalHhDirectas}</td>
+                  </tr>
+                </tbody>
+              </table>
+            )
+          })()}
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2">Maquinaria</h3>
+          {totalHm === 0 ? (
+            <p className="text-sm text-slate-400">No aplica — no hay HH de maquinaria en este reporte.</p>
+          ) : (
+            (() => {
+              const filas = parte.maquinaria.filter((f) => sumar(f.horas_por_actividad) > 0 || (f.cantidad || 0) > 0)
+              return (
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-slate-500 uppercase tracking-wide">
+                    <tr>
+                      <th className="text-left py-1">Equipo</th>
+                      <th className="text-right py-1">N° Equipos</th>
+                      <th className="text-right py-1">Operativos</th>
+                      <th className="text-right py-1">HM Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filas.map((f, i) => (
+                      <tr key={i}>
+                        <td className="py-1 text-slate-700">{f.equipo}</td>
+                        <td className="py-1 text-right text-slate-700">{f.cantidad}</td>
+                        <td className="py-1 text-right text-slate-700">{f.cantidad - f.mantencion - f.standby}</td>
+                        <td className="py-1 text-right font-medium text-slate-900">{sumar(f.horas_por_actividad)}</td>
+                      </tr>
+                    ))}
+                    <tr className="font-semibold border-t border-slate-200">
+                      <td className="py-1 text-slate-900" colSpan={3}>Total</td>
+                      <td className="py-1 text-right text-slate-900">{totalHm}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )
+            })()
+          )}
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2">Fuerza laboral indirecta</h3>
+          {(() => {
+            const filas = parte.mano_obra_indirecta.filter((f) => (f.contratados || 0) > 0 || (f.operativos || 0) > 0)
+            if (filas.length === 0) {
+              return <p className="text-sm text-slate-400">No se registró fuerza laboral indirecta en este reporte.</p>
+            }
+            return (
+              <table className="w-full text-sm">
+                <thead className="text-xs text-slate-500 uppercase tracking-wide">
+                  <tr>
+                    <th className="text-left py-1">Cargo</th>
+                    <th className="text-right py-1">Contratados</th>
+                    <th className="text-right py-1">Operativos</th>
+                    <th className="text-right py-1">HH Total (×{HH_TURNO_POR_FAENA[parte.faena]})</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filas.map((f, i) => (
+                    <tr key={i}>
+                      <td className="py-1 text-slate-700">{f.cargo}</td>
+                      <td className="py-1 text-right text-slate-700">{f.contratados}</td>
+                      <td className="py-1 text-right text-slate-700">{f.operativos}</td>
+                      <td className="py-1 text-right font-medium text-slate-900">
+                        {HH_TURNO_POR_FAENA[parte.faena] * (f.operativos || 0)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="font-semibold border-t border-slate-200">
+                    <td className="py-1 text-slate-900" colSpan={3}>Total</td>
+                    <td className="py-1 text-right text-slate-900">{totalHhIndirectas}</td>
+                  </tr>
+                </tbody>
+              </table>
+            )
+          })()}
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2">Resumen HH Programadas</h3>
+          <table className="w-full text-sm max-w-md">
+            <thead className="text-xs text-slate-500 uppercase tracking-wide">
+              <tr>
+                <th className="text-left py-1"></th>
+                <th className="text-right py-1">Programado</th>
+                <th className="text-right py-1">Real</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              <tr>
+                <td className="py-1 text-slate-700">HH Directas</td>
+                <td className="py-1 text-right text-slate-700">{parte.hh_directas_programado}</td>
+                <td className="py-1 text-right font-medium text-slate-900">{totalHhDirectas}</td>
+              </tr>
+              <tr>
+                <td className="py-1 text-slate-700">HH Indirectas</td>
+                <td className="py-1 text-right text-slate-700">{parte.hh_indirectas_programado}</td>
+                <td className="py-1 text-right font-medium text-slate-900">{totalHhIndirectas}</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
 
         <section>
           <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2">Actividades ejecutadas</h3>

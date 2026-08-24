@@ -137,7 +137,19 @@ const FILA_FIRMA_IMAGENES = 90 // fila 91 en Excel (la hoja "Imágenes" no tiene
 // EMU = 1 pulgada). Calculado a mano a partir del ancho real de columna
 // C/G y el alto de la fila "Firma" en la plantilla (33.6pt ≈ 426720 EMU),
 // para centrar la firma verticalmente y mantener su proporción original
-// (a diferencia de las fotos, acá no conviene estirarla).
+// (a diferencia de las fotos, acá no conviene estirarla) — como
+// noChangeAspect se deja en "1" para las firmas, Excel escala la imagen
+// para que quepa dentro de este recuadro sin deformarla, no la estira a
+// la fuerza para llenarlo.
+//
+// Recuadro agrandado ~30% (pedido explícito: "se ven pequeñas... la idea
+// es que se vean más grandes" — ver conversación del 2026-08-24) respecto
+// al tamaño original, mantiene el mismo margen izquierdo/superior y sigue
+// centrado dentro de la columna C/G y la fila "Firma", sin invadir columnas
+// ni filas vecinas: la columna C de la hoja DR (la más angosta de las dos
+// hojas donde se inserta esta caja) mide ~857.000 EMU de ancho y acá se
+// usan 534.000; la fila "Firma" mide 426.720 EMU de alto y acá se usan
+// 390.000 — en ambos casos queda margen de sobra.
 interface CajaFirma {
   col: number
   colOffIni: number
@@ -146,9 +158,9 @@ interface CajaFirma {
   rowOffFin: number
 }
 // Columna C (bajo "Firma" del Coordinador de Terreno).
-const CAJA_FIRMA_COORDINADOR: CajaFirma = { col: 2, colOffIni: 30000, colOffFin: 417931, rowOffIni: 63360, rowOffFin: 363360 }
+const CAJA_FIRMA_COORDINADOR: CajaFirma = { col: 2, colOffIni: 30000, colOffFin: 534000, rowOffIni: 18360, rowOffFin: 408360 }
 // Columna G (bajo "Firma" del Administrador Contrato / Sara Cofré).
-const CAJA_FIRMA_SARA: CajaFirma = { col: 6, colOffIni: 30000, colOffFin: 433846, rowOffIni: 63360, rowOffFin: 363360 }
+const CAJA_FIRMA_SARA: CajaFirma = { col: 6, colOffIni: 30000, colOffFin: 555000, rowOffIni: 18360, rowOffFin: 408360 }
 
 interface FirmaAInsertar {
   caja: CajaFirma
@@ -314,27 +326,59 @@ function horaATiempoExcel(hora: string | null | undefined): Date | null {
 }
 
 // ---------- Grilla de fotos (hoja "Imágenes") ----------
-// Grilla de 3 columnas, distribuida simétricamente dentro del rango B7:N88
-// (columnas 1 a 13 y desde la fila 7 en índice 0, que es como ExcelJS
-// cuenta col/row). La altura de cada fila de la grilla es fija (pensada
-// para que 3 filas — 9 fotos — llenen justo hasta la fila 88, como en el
-// diseño de referencia); si hay más de 9 fotos, la grilla sigue agregando
-// filas hacia abajo en vez de achicar las tarjetas para que "quepan
-// igual" — con pocas fotos (1 o 2) se ven del mismo tamaño natural que
-// con 9, no gigantes estiradas ocupando toda la hoja. Cada foto usa un
-// twoCellAnchor (con coordenadas fraccionarias tipo "col: 1.15") en vez
-// de un tamaño fijo en píxeles, para que el recuadro se ajuste al ancho
-// real de las columnas — igual a como queda al insertar imágenes a mano
-// en Excel arrastrándolas dentro de un rango de celdas.
+// Grilla de 3 columnas, distribuida simétricamente dentro del rango
+// B7:N90 (columnas 1 a 13 y desde la fila 7 en índice 0, que es como
+// ExcelJS cuenta col/row; FILA_FIRMA_IMAGENES=90 es el límite inferior,
+// donde empieza el bloque de firma). GRILLA_ALTURA_BANDA es la altura de
+// referencia (pensada para que 3 filas — 9 fotos — llenen justo hasta
+// el límite, como en el diseño original); con MENOS fotos que eso, en
+// vez de dejar el resto del recuadro vacío arriba, la altura de cada
+// banda se estira para repartir las fotos de manera uniforme dentro de
+// todo el espacio disponible, manteniéndolas todas del mismo tamaño
+// entre sí (pedido explícito: "que queden distribuidas uniformemente
+// dentro del cuadro rojo, con las fotos del mismo tamaño" — ver
+// conversación del 2026-08-24). Si hay MÁS fotos de las que caben en el
+// diseño de referencia, la altura vuelve al valor fijo y la grilla sigue
+// agregando filas hacia abajo (comportamiento sin cambios, no era parte
+// del reclamo). Cada foto usa un twoCellAnchor (con coordenadas
+// fraccionarias tipo "col: 1.15") en vez de un tamaño fijo en píxeles,
+// para que el recuadro se ajuste al ancho real de las columnas — igual a
+// como queda al insertar imágenes a mano en Excel arrastrándolas dentro
+// de un rango de celdas.
 const GRILLA_COL_INICIO = 1 // columna B
 const GRILLA_COL_FIN = 13 // columna N
 const GRILLA_FILA_INICIO = 7 // fila 8 (deja la fila 7 como encabezado de la sección)
 const GRILLA_COLUMNAS = 3
-const GRILLA_ALTURA_BANDA = 26 // alto fijo de cada fila de la grilla — 3 filas ≈ hasta la fila 88
+const GRILLA_ALTURA_BANDA = 26 // alto de referencia de cada fila de la grilla — 3 filas ≈ hasta la fila 88
+// Tope al estiramiento: sin esto, un reporte con 1 o 2 fotos (una sola
+// fila de la grilla) se estiraría hasta ocupar TODO el alto disponible
+// (~83 filas) en una tarjeta angosta (solo 1 de las 3 columnas) y muy
+// alargada — no era el problema real que se reportó (5 fotos agrupadas
+// arriba con espacio vacío abajo, 2 filas) y se veía peor que el tamaño
+// original. Con el tope, una sola fila se estira hasta el doble de su
+// alto de referencia como máximo (queda claramente más grande que antes,
+// sin llegar a ese extremo); desde 2 filas para arriba (4+ fotos) el
+// cálculo normal ya no choca con el tope y llena el espacio igual.
+const GRILLA_ALTURA_BANDA_MAXIMA = GRILLA_ALTURA_BANDA * 2
 const GRILLA_MARGEN = 0.15 // espacio entre tarjetas, en unidades de celda
 const GRILLA_ALTURA_LEYENDA = 2.2 // filas reservadas bajo la foto para el pie de foto
 
-function calcularCeldaFoto(index: number) {
+// Altura de banda a usar para un reporte con numFotos fotos: si con la
+// altura de referencia (GRILLA_ALTURA_BANDA) las filas necesarias caben
+// dentro del espacio disponible (desde GRILLA_FILA_INICIO hasta
+// FILA_FIRMA_IMAGENES), se agranda la banda —hasta GRILLA_ALTURA_BANDA_MAXIMA—
+// para ocupar ese espacio en vez de dejarlo vacío. Si no caben (muchas
+// fotos), se usa la altura de referencia sin cambios y la grilla crece
+// hacia abajo como siempre.
+function calcularAlturaBandaGrilla(numFotos: number): number {
+  if (numFotos <= 0) return GRILLA_ALTURA_BANDA
+  const numFilas = Math.ceil(numFotos / GRILLA_COLUMNAS)
+  const alturaDisponible = FILA_FIRMA_IMAGENES - GRILLA_FILA_INICIO
+  const alturaEstirada = Math.min(GRILLA_ALTURA_BANDA_MAXIMA, alturaDisponible / numFilas)
+  return Math.max(GRILLA_ALTURA_BANDA, alturaEstirada)
+}
+
+function calcularCeldaFoto(index: number, alturaBanda: number) {
   const col = index % GRILLA_COLUMNAS
   const fila = Math.floor(index / GRILLA_COLUMNAS)
 
@@ -342,8 +386,8 @@ function calcularCeldaFoto(index: number) {
 
   const tlCol = GRILLA_COL_INICIO + col * anchoColumna + GRILLA_MARGEN
   const brCol = GRILLA_COL_INICIO + (col + 1) * anchoColumna - GRILLA_MARGEN
-  const tlRow = GRILLA_FILA_INICIO + fila * GRILLA_ALTURA_BANDA + GRILLA_MARGEN
-  const brRowFoto = GRILLA_FILA_INICIO + (fila + 1) * GRILLA_ALTURA_BANDA - GRILLA_MARGEN - GRILLA_ALTURA_LEYENDA
+  const tlRow = GRILLA_FILA_INICIO + fila * alturaBanda + GRILLA_MARGEN
+  const brRowFoto = GRILLA_FILA_INICIO + (fila + 1) * alturaBanda - GRILLA_MARGEN - GRILLA_ALTURA_LEYENDA
 
   // Fila (índice 0) donde va el pie de foto: la primera fila completa
   // después del recuadro de la foto, pero antes de que empiece la fila
@@ -482,46 +526,59 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   hojaDR.getCell(CELDA_NOMBRE_COORDINADOR).value = creadorEsCoordinador ? creador!.nombre : ''
 
   // ---------- Fotos (hoja "Imágenes") ----------
-  // Grilla de 3 columnas repartida simétricamente en B7:N88 — ver
+  // Grilla de 3 columnas repartida simétricamente en B7:N90 — ver
   // calcularCeldaFoto() más arriba. Las esquinas redondeadas se agregan
   // después, en posprocesarExcel(), porque ExcelJS no expone esa opción
   // en su API de addImage.
+  //
+  // Se descargan TODAS las fotos primero (sin insertarlas todavía) para
+  // saber cuántas se lograron descargar de verdad antes de calcular la
+  // altura de la banda — si se calculara con fotosValidas.length y alguna
+  // foto fallara al descargarse, la grilla quedaría con una fila de menos
+  // fotos de lo esperado y un hueco vacío abajo (el mismo problema que se
+  // está corrigiendo, pero por otra causa).
   const fotosValidas = parte.fotos.slice(0, GRILLA_COLUMNAS * 20) // límite defensivo, no debería alcanzarse en uso normal
-  // No siempre coincide con fotosValidas.length: si alguna foto falla al
-  // descargarse (catch más abajo) se salta y no se inserta ningún ancla
-  // para ella — hay que contar solo las que de verdad se insertaron, para
-  // que el redondeo de esquinas en posprocesarExcel() no se desalinee.
-  let fotosInsertadas = 0
-  for (let i = 0; i < fotosValidas.length; i++) {
-    const foto = fotosValidas[i]
+  const fotosDescargadas: { buffer: ArrayBuffer; extension: 'png' | 'jpeg'; caption?: string }[] = []
+  for (const foto of fotosValidas) {
     try {
       const respFoto = await fetch(foto.url)
       if (!respFoto.ok) continue
       const bufferFoto = await respFoto.arrayBuffer()
       const urlSinQuery = foto.url.split('?')[0].toLowerCase()
       const extension = urlSinQuery.endsWith('.png') ? 'png' : 'jpeg'
-      const imageId = workbook.addImage({ buffer: bufferFoto as any, extension })
-
-      const celda = calcularCeldaFoto(fotosInsertadas)
-      // Los tipos de ExcelJS piden una instancia completa de su clase Anchor
-      // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
-      // objetos planos {col, row} sin problema — es un typing de ExcelJS
-      // más estricto que su propio comportamiento real.
-      // editAs: 'twoCell' es a propósito — ExcelJS por defecto usa 'oneCell'
-      // ("mover pero no cambiar tamaño con las celdas"), que es lo pensado
-      // para una imagen normal pegada en una celda, NO para esta grilla de
-      // fotos con recuadro fijo. Ver nota junto a corregirAnclasFotos() más
-      // abajo sobre por qué esto importaba (fotos de tamaños distintos en
-      // Excel real).
-      hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br, editAs: 'twoCell' } as any)
-
-      if (foto.caption) {
-        hojaImagenes.getRow(celda.filaLeyenda + 1).getCell(celda.colLeyenda + 1).value = foto.caption
-      }
-      fotosInsertadas += 1
+      fotosDescargadas.push({ buffer: bufferFoto, extension, caption: foto.caption })
     } catch (err) {
-      console.error('No se pudo insertar una foto en el Excel:', err)
+      console.error('No se pudo descargar una foto para el Excel:', err)
     }
+  }
+
+  const alturaBandaGrilla = calcularAlturaBandaGrilla(fotosDescargadas.length)
+
+  // No siempre coincide con fotosValidas.length: si alguna foto falla al
+  // descargarse (catch más arriba) se salta y no se inserta ningún ancla
+  // para ella — hay que contar solo las que de verdad se insertaron, para
+  // que el redondeo de esquinas en posprocesarExcel() no se desalinee.
+  let fotosInsertadas = 0
+  for (const foto of fotosDescargadas) {
+    const imageId = workbook.addImage({ buffer: foto.buffer as any, extension: foto.extension })
+
+    const celda = calcularCeldaFoto(fotosInsertadas, alturaBandaGrilla)
+    // Los tipos de ExcelJS piden una instancia completa de su clase Anchor
+    // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
+    // objetos planos {col, row} sin problema — es un typing de ExcelJS
+    // más estricto que su propio comportamiento real.
+    // editAs: 'twoCell' es a propósito — ExcelJS por defecto usa 'oneCell'
+    // ("mover pero no cambiar tamaño con las celdas"), que es lo pensado
+    // para una imagen normal pegada en una celda, NO para esta grilla de
+    // fotos con recuadro fijo. Ver nota junto a corregirAnclasFotos() más
+    // abajo sobre por qué esto importaba (fotos de tamaños distintos en
+    // Excel real).
+    hojaImagenes.addImage(imageId, { tl: celda.tl, br: celda.br, editAs: 'twoCell' } as any)
+
+    if (foto.caption) {
+      hojaImagenes.getRow(celda.filaLeyenda + 1).getCell(celda.colLeyenda + 1).value = foto.caption
+    }
+    fotosInsertadas += 1
   }
 
   // ---------- Firmas digitales (Administrador Contrato / Coordinador de

@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
-    "reset-password": "node scripts/restablecer-clave.mjs"
+    "reset-password": "node scripts/restablecer-clave.mjs",
+    "procesar-reportes-existentes": "tsx scripts/procesarReportesExistentes.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.1",
@@ -37,6 +38,7 @@
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.6",
+    "tsx": "^4.23.12",
     "typescript": "^5.2.2",
     "vite": "^5.0.0"
   }

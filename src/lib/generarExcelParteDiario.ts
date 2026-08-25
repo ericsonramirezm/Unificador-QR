@@ -353,7 +353,16 @@ const GRILLA_COL_FIN_EXCEL = 14 // columna N, INCLUSIVE (antes se usaba un lími
 const GRILLA_FILA_INICIO_EXCEL = 8 // primera fila de la grilla (fila 7 = encabezado "IMÁGENES", no se toca)
 const GRILLA_FILA_FIN_EXCEL = 88 // última fila de la grilla, justo antes de la fila 89 ("COORDINADOR DE TERRENO") — antes se usaba FILA_FIRMA_IMAGENES (fila 91, la fila "Firma"), que se metía 2 filas de más en la zona de Nombre/encabezado de esa sección
 const GRILLA_COLUMNAS = 3
-const GRILLA_MARGEN_EMU = 45000 // ~3.5pt — mismo valor para el margen entre tarjetas Y el margen contra el borde del recuadro (mitad de este valor a cada lado de cada tarjeta), para que quede simétrico en las 4 direcciones
+// ~23.6pt — mismo valor para el margen entre tarjetas Y el margen contra el
+// borde del recuadro (mitad de este valor a cada lado de cada tarjeta), para
+// que quede simétrico en las 4 direcciones. Calibrado (2026-08-25) contra un
+// ejemplo armado a mano por el usuario en el Excel descargado: al medir ese
+// ejemplo, el espacio entre fotos era ~7.3% del ancho de una celda de la
+// grilla y el margen contra el borde ~3.95% — el valor anterior (45000)
+// daba solo 1.14%/0.57%, casi 7 veces más angosto, por eso las fotos se
+// veían pegadas entre sí y contra el borde. 300000 EMU reproduce esa misma
+// proporción (7.57%/3.79% del ancho de celda).
+const GRILLA_MARGEN_EMU = 300000
 const GRILLA_ALTURA_LEYENDA_EMU = 260000 // ~20pt reservados bajo cada foto para el pie de foto
 const EMU_POR_PUNTO = 12700
 const EMU_POR_PIXEL = 9525 // estándar OOXML para imágenes a 96 DPI (mismo valor que usa anchoColumnaEMU al convertir px→EMU)

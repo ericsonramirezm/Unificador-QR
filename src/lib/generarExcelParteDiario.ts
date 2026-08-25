@@ -326,80 +326,207 @@ function horaATiempoExcel(hora: string | null | undefined): Date | null {
 }
 
 // ---------- Grilla de fotos (hoja "Imágenes") ----------
-// Grilla de 3 columnas, distribuida simétricamente dentro del rango
-// B7:N90 (columnas 1 a 13 y desde la fila 7 en índice 0, que es como
-// ExcelJS cuenta col/row; FILA_FIRMA_IMAGENES=90 es el límite inferior,
-// donde empieza el bloque de firma). GRILLA_ALTURA_BANDA es la altura de
-// referencia (pensada para que 3 filas — 9 fotos — llenen justo hasta
-// el límite, como en el diseño original); con MENOS fotos que eso, en
-// vez de dejar el resto del recuadro vacío arriba, la altura de cada
-// banda se estira para repartir las fotos de manera uniforme dentro de
-// todo el espacio disponible, manteniéndolas todas del mismo tamaño
-// entre sí (pedido explícito: "que queden distribuidas uniformemente
-// dentro del cuadro rojo, con las fotos del mismo tamaño" — ver
-// conversación del 2026-08-24). Si hay MÁS fotos de las que caben en el
-// diseño de referencia, la altura vuelve al valor fijo y la grilla sigue
-// agregando filas hacia abajo (comportamiento sin cambios, no era parte
-// del reclamo). Cada foto usa un twoCellAnchor (con coordenadas
-// fraccionarias tipo "col: 1.15") en vez de un tamaño fijo en píxeles,
-// para que el recuadro se ajuste al ancho real de las columnas — igual a
-// como queda al insertar imágenes a mano en Excel arrastrándolas dentro
-// de un rango de celdas.
-const GRILLA_COL_INICIO = 1 // columna B
-const GRILLA_COL_FIN = 13 // columna N
-const GRILLA_FILA_INICIO = 7 // fila 8 (deja la fila 7 como encabezado de la sección)
+// Grilla de 3 columnas dentro del rango B8:N88 (fila 7 queda como
+// encabezado de la sección, fila 89 es donde arranca "COORDINADOR DE
+// TERRENO"). Cada foto usa un twoCellAnchor con offsets en EMU exactos
+// (mismo principio que las cajas de firma, CajaFirma más arriba) — NO
+// coordenadas fraccionarias tipo "col: 1.15", como se usaba antes.
+//
+// Se cambió a EMU exactos porque las coordenadas fraccionarias resultaron
+// poco confiables para este reclamo puntual: la clase Anchor de ExcelJS
+// (node_modules/exceljs/lib/doc/anchor.js) convierte la parte fraccionaria
+// de "col"/"row" a colOff/rowOff multiplicándola por el ancho de columna
+// o alto de fila EXPRESADO EN "unidad*10000" (ej. 13.67 caracteres ->
+// 136700), no en EMU real — así que un margen pensado como "0.15 de una
+// celda" terminaba escribiéndose como un offset EMU minúsculo (0.15 *
+// 136700 ≈ 20.000 EMU ≈ 1,6pt), casi invisible: por eso las fotos
+// quedaban pegadas al borde izquierdo/superior en vez de tener un margen
+// simétrico. Además la fila "Firma" original (FILA_FIRMA_IMAGENES) se
+// usaba como límite inferior de la grilla, mezclando el reclamo aparte de
+// agrandar la firma con el cálculo de cuánto espacio hay para fotos.
+//
+// Con offsets EMU explícitos (calculados a mano acá con el ancho/alto
+// REAL de columnas y filas de la plantilla, vía hoja.getColumn/getRow) el
+// resultado es exacto y predecible, igual que con las firmas.
+const GRILLA_COL_INICIO_EXCEL = 2 // columna B (1-index, como usa ExcelJS getColumn)
+const GRILLA_COL_FIN_EXCEL = 14 // columna N, INCLUSIVE (antes se usaba un límite de 13 en índice 0 que en la práctica dejaba la columna N entera sin usar — el hueco a la derecha del reclamo)
+const GRILLA_FILA_INICIO_EXCEL = 8 // primera fila de la grilla (fila 7 = encabezado "IMÁGENES", no se toca)
+const GRILLA_FILA_FIN_EXCEL = 88 // última fila de la grilla, justo antes de la fila 89 ("COORDINADOR DE TERRENO") — antes se usaba FILA_FIRMA_IMAGENES (fila 91, la fila "Firma"), que se metía 2 filas de más en la zona de Nombre/encabezado de esa sección
 const GRILLA_COLUMNAS = 3
-const GRILLA_ALTURA_BANDA = 26 // alto de referencia de cada fila de la grilla — 3 filas ≈ hasta la fila 88
-// Tope al estiramiento: sin esto, un reporte con 1 o 2 fotos (una sola
-// fila de la grilla) se estiraría hasta ocupar TODO el alto disponible
-// (~83 filas) en una tarjeta angosta (solo 1 de las 3 columnas) y muy
-// alargada — no era el problema real que se reportó (5 fotos agrupadas
-// arriba con espacio vacío abajo, 2 filas) y se veía peor que el tamaño
-// original. Con el tope, una sola fila se estira hasta el doble de su
-// alto de referencia como máximo (queda claramente más grande que antes,
-// sin llegar a ese extremo); desde 2 filas para arriba (4+ fotos) el
-// cálculo normal ya no choca con el tope y llena el espacio igual.
-const GRILLA_ALTURA_BANDA_MAXIMA = GRILLA_ALTURA_BANDA * 2
-const GRILLA_MARGEN = 0.15 // espacio entre tarjetas, en unidades de celda
-const GRILLA_ALTURA_LEYENDA = 2.2 // filas reservadas bajo la foto para el pie de foto
+const GRILLA_MARGEN_EMU = 45000 // ~3.5pt — mismo valor para el margen entre tarjetas Y el margen contra el borde del recuadro (mitad de este valor a cada lado de cada tarjeta), para que quede simétrico en las 4 direcciones
+const GRILLA_ALTURA_LEYENDA_EMU = 260000 // ~20pt reservados bajo cada foto para el pie de foto
+const EMU_POR_PUNTO = 12700
+const EMU_POR_PIXEL = 9525 // estándar OOXML para imágenes a 96 DPI (mismo valor que usa anchoColumnaEMU al convertir px→EMU)
+const ANCHO_CARACTER_PX = 7 // "Maximum Digit Width" de Calibri 11 — la misma constante que usa Excel para convertir ancho de columna (caracteres) a píxeles
 
-// Altura de banda a usar para un reporte con numFotos fotos: si con la
-// altura de referencia (GRILLA_ALTURA_BANDA) las filas necesarias caben
-// dentro del espacio disponible (desde GRILLA_FILA_INICIO hasta
-// FILA_FIRMA_IMAGENES), se agranda la banda —hasta GRILLA_ALTURA_BANDA_MAXIMA—
-// para ocupar ese espacio en vez de dejarlo vacío. Si no caben (muchas
-// fotos), se usa la altura de referencia sin cambios y la grilla crece
-// hacia abajo como siempre.
-function calcularAlturaBandaGrilla(numFotos: number): number {
-  if (numFotos <= 0) return GRILLA_ALTURA_BANDA
-  const numFilas = Math.ceil(numFotos / GRILLA_COLUMNAS)
-  const alturaDisponible = FILA_FIRMA_IMAGENES - GRILLA_FILA_INICIO
-  const alturaEstirada = Math.min(GRILLA_ALTURA_BANDA_MAXIMA, alturaDisponible / numFilas)
-  return Math.max(GRILLA_ALTURA_BANDA, alturaEstirada)
+// Lee el ancho/alto REAL (en píxeles) de la foto desde sus propios bytes,
+// para poder insertarla respetando su proporción original en vez de
+// estirarla para llenar la celda (ver calcularCeldaFoto). Se parsean los
+// headers a mano (sin depender de <img>/Image(), que no existe en el
+// entorno de pruebas de Node) porque tanto PNG como JPEG traen sus
+// dimensiones en un lugar fijo/predecible del archivo.
+function dimensionesPng(bytes: Uint8Array): { width: number; height: number } | null {
+  // Firma de 8 bytes + chunk IHDR: 4 bytes de largo + "IHDR" (4 bytes) +
+  // ancho (4 bytes, big-endian) + alto (4 bytes, big-endian).
+  if (bytes.length < 24) return null
+  if (bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) return null
+  const width = ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>> 0
+  const height = ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>> 0
+  return { width, height }
 }
 
-function calcularCeldaFoto(index: number, alturaBanda: number) {
+function dimensionesJpeg(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null
+  let offset = 2
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1
+      continue
+    }
+    const marcador = bytes[offset + 1]
+    // Marcadores SOFn (inicio de frame, traen las dimensiones) — se
+    // excluyen 0xC4 (DHT), 0xC8 (JPG, reservado) y 0xCC (DAC), que caen en
+    // el mismo rango 0xC0–0xCF pero no son SOFn.
+    if (marcador >= 0xc0 && marcador <= 0xcf && marcador !== 0xc4 && marcador !== 0xc8 && marcador !== 0xcc) {
+      const height = (bytes[offset + 5] << 8) | bytes[offset + 6]
+      const width = (bytes[offset + 7] << 8) | bytes[offset + 8]
+      return { width, height }
+    }
+    const largoSegmento = (bytes[offset + 2] << 8) | bytes[offset + 3]
+    if (largoSegmento < 2) return null // segmento inválido, evita loop infinito
+    offset += 2 + largoSegmento
+  }
+  return null
+}
+
+function dimensionesImagen(buffer: ArrayBuffer, extension: 'png' | 'jpeg'): { width: number; height: number } {
+  const bytes = new Uint8Array(buffer)
+  const dim = extension === 'png' ? dimensionesPng(bytes) : dimensionesJpeg(bytes)
+  // Si no se pudo leer (archivo corrupto o formato inesperado — no debería
+  // pasar en uso normal, GestorFotos solo acepta image/*), se usa un 4:3
+  // genérico como respaldo para no romper la generación del Excel.
+  return dim && dim.width > 0 && dim.height > 0 ? dim : { width: 1200, height: 900 }
+}
+
+function anchoColumnaEMU(hoja: ExcelJS.Worksheet, colExcel: number): number {
+  const caracteres = hoja.getColumn(colExcel).width ?? hoja.properties.defaultColWidth ?? 8.43
+  const px = Math.round(((256 * caracteres + Math.trunc(128 / ANCHO_CARACTER_PX)) / 256) * ANCHO_CARACTER_PX)
+  return px * 9525
+}
+
+function altoFilaEMU(hoja: ExcelJS.Worksheet, filaExcel: number): number {
+  const puntos = hoja.getRow(filaExcel).height ?? hoja.properties.defaultRowHeight ?? 15
+  return Math.round(puntos * EMU_POR_PUNTO)
+}
+
+function sumaAnchoColumnasEMU(hoja: ExcelJS.Worksheet, colIniExcel: number, colFinExcel: number): number {
+  let total = 0
+  for (let c = colIniExcel; c <= colFinExcel; c++) total += anchoColumnaEMU(hoja, c)
+  return total
+}
+
+function sumaAltoFilasEMU(hoja: ExcelJS.Worksheet, filaIniExcel: number, filaFinExcel: number): number {
+  let total = 0
+  for (let f = filaIniExcel; f <= filaFinExcel; f++) total += altoFilaEMU(hoja, f)
+  return total
+}
+
+// Recorre columnas/filas reales desde el inicio de la grilla acumulando
+// una distancia en EMU, y devuelve en qué columna/fila (índice 0, como
+// espera el anchor de ExcelJS) y a qué offset EMU dentro de ella cae ese
+// punto — el mismo cálculo que hace Excel al insertar una imagen a mano
+// arrastrándola dentro de un rango de celdas.
+function avanzarColumnasEMU(hoja: ExcelJS.Worksheet, colIniExcel: number, distanciaEMU: number) {
+  let col = colIniExcel
+  let restante = distanciaEMU
+  for (;;) {
+    const ancho = anchoColumnaEMU(hoja, col)
+    if (restante < ancho || col > 16384) return { nativeCol: col - 1, nativeColOff: Math.max(0, Math.round(restante)) }
+    restante -= ancho
+    col += 1
+  }
+}
+
+function avanzarFilasEMU(hoja: ExcelJS.Worksheet, filaIniExcel: number, distanciaEMU: number) {
+  let fila = filaIniExcel
+  let restante = distanciaEMU
+  for (;;) {
+    const alto = altoFilaEMU(hoja, fila)
+    if (restante < alto || fila > 1048576) return { nativeRow: fila - 1, nativeRowOff: Math.max(0, Math.round(restante)) }
+    restante -= alto
+    fila += 1
+  }
+}
+
+// Altura de banda a usar para un reporte con numFotos fotos: si con la
+// altura de referencia (el recuadro completo dividido en 3 filas, el
+// diseño pensado para 9 fotos) las filas necesarias caben dentro del
+// espacio disponible, se agranda la banda —hasta el doble de esa
+// referencia como tope— para ocupar ese espacio en vez de dejarlo vacío.
+// Si no caben (muchas fotos), se usa la altura de referencia sin cambios
+// y la grilla sigue agregando filas hacia abajo como siempre.
+function altoBandaFotoEMU(hoja: ExcelJS.Worksheet, numFotos: number): number {
+  const totalEMU = sumaAltoFilasEMU(hoja, GRILLA_FILA_INICIO_EXCEL, GRILLA_FILA_FIN_EXCEL)
+  const referenciaEMU = totalEMU / 3
+  if (numFotos <= 0) return referenciaEMU
+  const numFilas = Math.ceil(numFotos / GRILLA_COLUMNAS)
+  const estiradaEMU = Math.min(referenciaEMU * 2, totalEMU / numFilas)
+  return Math.max(referenciaEMU, estiradaEMU)
+}
+
+// anchoNaturalEMU/altoNaturalEMU: tamaño real de la foto (en EMU, ver
+// dimensionesImagen). La foto se escala manteniendo su proporción original
+// — nunca se deforma — y solo se achica lo justo para que quepa dentro del
+// espacio disponible de su celda; si ya cabe tal cual, se deja a su tamaño
+// natural (no se agranda). El resultado queda centrado horizontal y
+// verticalmente dentro del margen de la celda.
+function calcularCeldaFoto(
+  hoja: ExcelJS.Worksheet,
+  index: number,
+  alturaBandaEMU: number,
+  anchoNaturalEMU: number,
+  altoNaturalEMU: number
+) {
   const col = index % GRILLA_COLUMNAS
   const fila = Math.floor(index / GRILLA_COLUMNAS)
 
-  const anchoColumna = (GRILLA_COL_FIN - GRILLA_COL_INICIO) / GRILLA_COLUMNAS
+  const anchoTotalEMU = sumaAnchoColumnasEMU(hoja, GRILLA_COL_INICIO_EXCEL, GRILLA_COL_FIN_EXCEL)
+  const anchoBandaEMU = anchoTotalEMU / GRILLA_COLUMNAS
 
-  const tlCol = GRILLA_COL_INICIO + col * anchoColumna + GRILLA_MARGEN
-  const brCol = GRILLA_COL_INICIO + (col + 1) * anchoColumna - GRILLA_MARGEN
-  const tlRow = GRILLA_FILA_INICIO + fila * alturaBanda + GRILLA_MARGEN
-  const brRowFoto = GRILLA_FILA_INICIO + (fila + 1) * alturaBanda - GRILLA_MARGEN - GRILLA_ALTURA_LEYENDA
+  // Espacio disponible para la foto dentro de su celda (sin contar el
+  // margen entre tarjetas ni la banda reservada para el pie de foto).
+  const cajaXIni = col * anchoBandaEMU + GRILLA_MARGEN_EMU / 2
+  const cajaXFin = (col + 1) * anchoBandaEMU - GRILLA_MARGEN_EMU / 2
+  const cajaYIni = fila * alturaBandaEMU + GRILLA_MARGEN_EMU / 2
+  const cajaYFin = (fila + 1) * alturaBandaEMU - GRILLA_MARGEN_EMU / 2 - GRILLA_ALTURA_LEYENDA_EMU
+  const distYFinLeyenda = (fila + 1) * alturaBandaEMU - GRILLA_MARGEN_EMU / 2
 
-  // Fila (índice 0) donde va el pie de foto: la primera fila completa
-  // después del recuadro de la foto, pero antes de que empiece la fila
-  // siguiente de la grilla (que ya arranca a los GRILLA_MARGEN de acá) —
-  // si no, la foto de abajo tapa visualmente el texto del pie de foto.
-  const filaLeyenda = Math.ceil(brRowFoto)
+  const anchoDisponibleEMU = cajaXFin - cajaXIni
+  const altoDisponibleEMU = cajaYFin - cajaYIni
+
+  const escala = Math.min(1, anchoDisponibleEMU / anchoNaturalEMU, altoDisponibleEMU / altoNaturalEMU)
+  const anchoFotoEMU = anchoNaturalEMU * escala
+  const altoFotoEMU = altoNaturalEMU * escala
+
+  const distXIni = cajaXIni + (anchoDisponibleEMU - anchoFotoEMU) / 2
+  const distXFin = distXIni + anchoFotoEMU
+  const distYIniFoto = cajaYIni + (altoDisponibleEMU - altoFotoEMU) / 2
+  const distYFinFoto = distYIniFoto + altoFotoEMU
+
+  const tlCol = avanzarColumnasEMU(hoja, GRILLA_COL_INICIO_EXCEL, distXIni)
+  const brCol = avanzarColumnasEMU(hoja, GRILLA_COL_INICIO_EXCEL, distXFin)
+  const tlRow = avanzarFilasEMU(hoja, GRILLA_FILA_INICIO_EXCEL, distYIniFoto)
+  const brRow = avanzarFilasEMU(hoja, GRILLA_FILA_INICIO_EXCEL, distYFinFoto)
+  // Fila donde va el pie de foto: justo después del margen inferior de la
+  // tarjeta, antes de que empiece la banda siguiente — si no, la foto de
+  // abajo tapa visualmente el texto del pie de foto.
+  const leyendaRow = avanzarFilasEMU(hoja, GRILLA_FILA_INICIO_EXCEL, distYFinLeyenda)
 
   return {
-    tl: { col: tlCol, row: tlRow },
-    br: { col: brCol, row: brRowFoto },
-    filaLeyenda,
-    colLeyenda: Math.floor(tlCol),
+    tl: { nativeCol: tlCol.nativeCol, nativeColOff: tlCol.nativeColOff, nativeRow: tlRow.nativeRow, nativeRowOff: tlRow.nativeRowOff },
+    br: { nativeCol: brCol.nativeCol, nativeColOff: brCol.nativeColOff, nativeRow: brRow.nativeRow, nativeRowOff: brRow.nativeRowOff },
+    filaLeyenda: leyendaRow.nativeRow,
+    colLeyenda: tlCol.nativeCol,
   }
 }
 
@@ -552,7 +679,7 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
     }
   }
 
-  const alturaBandaGrilla = calcularAlturaBandaGrilla(fotosDescargadas.length)
+  const alturaBandaGrilla = altoBandaFotoEMU(hojaImagenes, fotosDescargadas.length)
 
   // No siempre coincide con fotosValidas.length: si alguna foto falla al
   // descargarse (catch más arriba) se salta y no se inserta ningún ancla
@@ -562,11 +689,18 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   for (const foto of fotosDescargadas) {
     const imageId = workbook.addImage({ buffer: foto.buffer as any, extension: foto.extension })
 
-    const celda = calcularCeldaFoto(fotosInsertadas, alturaBandaGrilla)
+    const dimensiones = dimensionesImagen(foto.buffer, foto.extension)
+    const anchoNaturalEMU = dimensiones.width * EMU_POR_PIXEL
+    const altoNaturalEMU = dimensiones.height * EMU_POR_PIXEL
+    const celda = calcularCeldaFoto(hojaImagenes, fotosInsertadas, alturaBandaGrilla, anchoNaturalEMU, altoNaturalEMU)
     // Los tipos de ExcelJS piden una instancia completa de su clase Anchor
     // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
-    // objetos planos {col, row} sin problema — es un typing de ExcelJS
-    // más estricto que su propio comportamiento real.
+    // objetos planos {nativeCol, nativeColOff, nativeRow, nativeRowOff} sin
+    // problema — es un typing de ExcelJS más estricto que su propio
+    // comportamiento real. Se usa nativeCol/nativeColOff/nativeRow/nativeRowOff
+    // (EMU exactos, calculados a mano más arriba) en vez de {col, row}
+    // fraccionarios — ver la nota junto a GRILLA_COL_INICIO_EXCEL sobre por
+    // qué {col, row} fraccionario no daba un resultado confiable acá.
     // editAs: 'twoCell' es a propósito — ExcelJS por defecto usa 'oneCell'
     // ("mover pero no cambiar tamaño con las celdas"), que es lo pensado
     // para una imagen normal pegada en una celda, NO para esta grilla de

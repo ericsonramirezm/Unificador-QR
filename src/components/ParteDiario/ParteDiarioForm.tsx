@@ -14,6 +14,7 @@ import {
   Usuario,
 } from '@/types/index'
 import { FotoPendiente, GestorFotos } from './GestorFotos'
+import { DailyReportExcelPreview } from './DailyReportExcelPreview'
 
 interface ParteDiarioFormProps {
   usuario: Usuario
@@ -170,6 +171,17 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState<'borrador' | 'enviado' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Al terminar de guardar, en vez de volver directo a la lista (como
+  // antes) se muestra una pantalla de confirmación con un botón "Ver
+  // Daily Report" que abre la vista previa tipo Excel — pedido explícito
+  // ("al crear un daily coloca un botón para poder ver el daily final
+  // creado al estilo modal", ver conversación del 2026-08-24). parteGuardada
+  // se llena con el registro recién guardado, vuelto a pedir completo
+  // (con usuario_creador y firma_url incluidos, que ni crearParteDiario ni
+  // actualizarParteDiario devuelven) para que la vista previa tenga todo
+  // lo que necesita, igual que ParteDiarioDetalle.
+  const [parteGuardada, setParteGuardada] = useState<ParteDiario | null>(null)
+  const [mostrarVistaPrevia, setMostrarVistaPrevia] = useState(false)
 
   const numActividades = Math.min(Math.max(actividades.length, 1), MAX_ACTIVIDADES)
 
@@ -374,7 +386,12 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
         await db.actualizarParteDiario(parte.id, { fotos: fotosFinal })
       }
 
-      onGuardado()
+      // crearParteDiario/actualizarParteDiario no traen usuario_creador ni
+      // el arreglo de fotos final (si se acaban de subir) — se vuelve a
+      // pedir completo, igual que hace ParteDiarioDetalle, para que la
+      // vista previa muestre nombre/firma del coordinador y las fotos.
+      const parteCompleto = await db.obtenerParteDiario(parte.id)
+      setParteGuardada(parteCompleto as ParteDiario)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar el Daily Report')
     } finally {
@@ -385,6 +402,47 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
   const inputClase =
     'w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600'
   const inputNumClase = inputClase + ' text-right'
+
+  // Pantalla de confirmación tras guardar: reemplaza al formulario (en vez
+  // de volver directo a la lista con onGuardado()) para ofrecer "Ver Daily
+  // Report" antes de salir. onGuardado() se llama recién cuando el usuario
+  // elige "Volver a la lista" (o cierra la vista previa y decide volver).
+  if (parteGuardada) {
+    return (
+      <div className="bg-white rounded-lg border border-slate-200 p-8 text-center space-y-4">
+        <div className="text-emerald-600 text-4xl">✓</div>
+        <h2 className="text-lg font-bold text-slate-900">
+          Daily Report N° {String(parteGuardada.numero_reporte).padStart(3, '0')} guardado
+        </h2>
+        <p className="text-sm text-slate-500">
+          {FAENA_LABELS[parteGuardada.faena]} · {parteGuardada.fecha}
+        </p>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={() => setMostrarVistaPrevia(true)}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Ver Daily Report
+          </button>
+          <button
+            type="button"
+            onClick={onGuardado}
+            className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Volver a la lista
+          </button>
+        </div>
+        {mostrarVistaPrevia && (
+          <DailyReportExcelPreview
+            parte={parteGuardada}
+            contrato={contrato}
+            onCerrar={() => setMostrarVistaPrevia(false)}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-8">

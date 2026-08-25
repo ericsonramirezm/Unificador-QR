@@ -149,6 +149,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
           hm: (ultimoLT?.hm_acumuladas ?? 0) + (ultimoLB?.hm_acumuladas ?? 0),
           indirectas: (ultimoLT?.hh_indirectas_acumuladas ?? 0) + (ultimoLB?.hh_indirectas_acumuladas ?? 0),
         }
+        const totalHH = totalGeneral.directas + totalGeneral.hm + totalGeneral.indirectas
         return (
           <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -162,22 +163,30 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                   <th className="text-right px-4 py-2">HH Directas</th>
                   <th className="text-right px-4 py-2">HM Maquinaria</th>
                   <th className="text-right px-4 py-2">HH Indirectas</th>
+                  <th className="text-right px-4 py-2">Total HH</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filas.map(({ etiqueta, parte }) => (
-                  <tr key={etiqueta}>
-                    <td className="px-4 py-2 text-slate-700">{etiqueta}</td>
-                    <td className="px-4 py-2 text-right font-mono text-slate-900">{parte?.hh_directas_acumuladas ?? 0}</td>
-                    <td className="px-4 py-2 text-right font-mono text-slate-900">{parte?.hm_acumuladas ?? 0}</td>
-                    <td className="px-4 py-2 text-right font-mono text-slate-900">{parte?.hh_indirectas_acumuladas ?? 0}</td>
-                  </tr>
-                ))}
+                {filas.map(({ etiqueta, parte }) => {
+                  const directas = parte?.hh_directas_acumuladas ?? 0
+                  const hm = parte?.hm_acumuladas ?? 0
+                  const indirectas = parte?.hh_indirectas_acumuladas ?? 0
+                  return (
+                    <tr key={etiqueta}>
+                      <td className="px-4 py-2 text-slate-700">{etiqueta}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-900">{directas}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-900">{hm}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-900">{indirectas}</td>
+                      <td className="px-4 py-2 text-right font-mono font-semibold text-slate-900">{directas + hm + indirectas}</td>
+                    </tr>
+                  )
+                })}
                 <tr className="bg-slate-50 font-semibold">
                   <td className="px-4 py-2 text-slate-900">Total general</td>
                   <td className="px-4 py-2 text-right font-mono text-slate-900">{totalGeneral.directas}</td>
                   <td className="px-4 py-2 text-right font-mono text-slate-900">{totalGeneral.hm}</td>
                   <td className="px-4 py-2 text-right font-mono text-slate-900">{totalGeneral.indirectas}</td>
+                  <td className="px-4 py-2 text-right font-mono text-slate-900">{totalHH}</td>
                 </tr>
               </tbody>
             </table>

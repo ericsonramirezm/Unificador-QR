@@ -6,10 +6,11 @@ import { HistorialAprobados } from '@components/History/HistorialAprobados'
 import { GestionUsuarios } from '@components/Users/GestionUsuarios'
 import { ParteDiarioList } from '@components/ParteDiario/ParteDiarioList'
 import { Inicio } from '@components/Inicio/Inicio'
+import { Compras } from '@components/Compras/Compras'
 import { Usuario, UserRole } from '@/types/index'
 import { auth, db } from '@lib/supabase'
 
-type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'
+type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras'
 
 export function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
@@ -99,6 +100,10 @@ export function App() {
 
       {activeView === 'parte-diario' && usuario.rol !== UserRole.SUPERVISOR && (
         <ParteDiarioList usuario={usuario} contrato={contratoActivo} />
+      )}
+
+      {activeView === 'compras' && (usuario.rol === UserRole.COORDINADOR || usuario.rol === UserRole.CONSULTOR) && (
+        <Compras />
       )}
 
       {activeView === 'config' && (

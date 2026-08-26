@@ -32,3 +32,34 @@ export async function generarMiniaturaPDF(file: File): Promise<{ previewDataUrl:
 
   return { previewDataUrl, miniaturaBlob }
 }
+
+/**
+ * Renderiza todas las páginas de un PDF a imágenes, para el modal de
+ * "Ver Previa" del documento de respaldo en Nueva Solicitud de Compra (ver
+ * NuevaSolicitudCompraModal.tsx) — a diferencia de generarMiniaturaPDF()
+ * (arriba), que solo renderiza la página 1 para una miniatura chica.
+ * maxPaginas es un límite de seguridad para PDFs muy largos: es una vista
+ * previa rápida, no un lector de documentos completo.
+ */
+export async function renderizarPaginasPDF(file: File, maxPaginas = 20): Promise<string[]> {
+  const bytes = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+  const totalPaginas = Math.min(pdf.numPages, maxPaginas)
+
+  const paginas: string[] = []
+  for (let i = 1; i <= totalPaginas; i++) {
+    const pagina = await pdf.getPage(i)
+    const viewport = pagina.getViewport({ scale: 1.3 })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) continue
+
+    await pagina.render({ canvasContext: ctx, viewport }).promise
+    paginas.push(canvas.toDataURL('image/jpeg', 0.85))
+  }
+
+  return paginas
+}

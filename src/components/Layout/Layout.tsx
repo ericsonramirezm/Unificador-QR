@@ -2,7 +2,7 @@ import { Usuario, UserRole } from '@/types/index'
 import { auth } from '@lib/supabase'
 import { useState } from 'react'
 
-type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario'
+type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras'
 
 interface LayoutProps {
   usuario: Usuario | null
@@ -84,6 +84,20 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
               label="Ver documentos"
               active={activeView === 'documentos'}
               onClick={() => onViewChange('documentos')}
+              expanded={navExpanded}
+            />
+          )}
+
+          {/* Compras: módulo nuevo, todavía solo con una vista en blanco
+              (ver Compras.tsx) — pedido explícito de acceso restringido a
+              coordinador y consultor únicamente, ver conversación del
+              2026-08-25. Colocado justo encima de Daily Report a pedido. */}
+          {(usuario?.rol === UserRole.COORDINADOR || usuario?.rol === UserRole.CONSULTOR) && (
+            <NavItem
+              icon="🛒"
+              label="Compras"
+              active={activeView === 'compras'}
+              onClick={() => onViewChange('compras')}
               expanded={navExpanded}
             />
           )}

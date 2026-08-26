@@ -3,9 +3,15 @@ import { db } from '@lib/supabase'
 import { FAENA_LABELS, HH_TURNO_POR_FAENA, ParteDiario, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
 import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
 import { puedeEditar, puedeEliminar } from './permisos'
+import { DailyReportExcelPreview } from './DailyReportExcelPreview'
 
 interface ParteDiarioDetalleProps {
   usuario: Usuario
+  // Necesario para la vista previa tipo Excel (DailyReportExcelPreview),
+  // que muestra código/nombre del contrato igual que en la pantalla de
+  // confirmación de ParteDiarioForm. ParteDiarioList ya lo recibe como
+  // prop, así que solo hay que pasarlo hacia acá.
+  contrato: any
   parteId: string
   onVolver: () => void
   // Opcional porque no todos los que muestran este detalle necesariamente
@@ -18,10 +24,15 @@ const sumarHoras = (items: any[], campo: string) =>
 
 const sumar = (valores: (number | null | undefined)[]) => valores.reduce((acc: number, v) => acc + (v || 0), 0)
 
-export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: ParteDiarioDetalleProps) => {
+export const ParteDiarioDetalle = ({ usuario, contrato, parteId, onVolver, onEditar }: ParteDiarioDetalleProps) => {
   const [parte, setParte] = useState<ParteDiario | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Igual que en ParteDiarioForm: "Ver Daily Report" abre la vista previa
+  // tipo Excel sin descargar nada. Acá aplica a cualquier reporte ya
+  // existente (no solo al recién creado) — pedido explícito, ver
+  // conversación del 2026-08-25.
+  const [mostrarVistaPrevia, setMostrarVistaPrevia] = useState(false)
 
   const [comentarioAutor, setComentarioAutor] = useState(usuario.nombre)
   const [comentario, setComentario] = useState('')
@@ -148,6 +159,12 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: Par
               </button>
             )}
             <button
+              onClick={() => setMostrarVistaPrevia(true)}
+              className="px-3 py-1.5 border border-blue-200 text-blue-600 text-sm font-semibold rounded-lg hover:bg-blue-50 transition-colors"
+            >
+              Ver Daily Report
+            </button>
+            <button
               onClick={descargarExcel}
               disabled={isGenerandoExcel}
               className="px-3 py-1.5 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
@@ -156,6 +173,14 @@ export const ParteDiarioDetalle = ({ usuario, parteId, onVolver, onEditar }: Par
             </button>
           </div>
         </div>
+
+        {mostrarVistaPrevia && (
+          <DailyReportExcelPreview
+            parte={parte}
+            contrato={contrato}
+            onCerrar={() => setMostrarVistaPrevia(false)}
+          />
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
           <div className="bg-slate-50 rounded-lg p-4">

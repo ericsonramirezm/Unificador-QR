@@ -92,6 +92,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
     return (
       <ParteDiarioDetalle
         usuario={usuario}
+        contrato={contrato}
         parteId={parteSeleccionado}
         onVolver={() => {
           setParteSeleccionado(null)

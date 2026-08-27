@@ -5,6 +5,8 @@ import { formatearCargo } from '@lib/formato'
 import { generarMiniaturaPDF } from '@lib/renderizarPDF'
 import { Documento, DocumentType, Priority } from '@/types/index'
 import { AjustarEsquinasModal } from '@components/Upload/AjustarEsquinasModal'
+import { traducirError } from '@lib/errores'
+import { comprimirImagen, DOCUMENTO_ESCANEADO } from '@lib/comprimirImagen'
 
 interface CameraUploadProps {
   contratoId: string
@@ -48,6 +50,10 @@ export const CameraUpload = ({
   const [fotos, setFotos] = useState<ItemCarrusel[]>([])
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0)
   const [isUploading, setIsUploading] = useState(false)
+  // Progreso real de la subida: antes el botón decía "Subiendo N documentos…"
+  // de forma estática, sin indicar cuántos llevaba. Con señal mala eso puede
+  // ser un minuto largo sin saber si avanza.
+  const [progreso, setProgreso] = useState<{ hechas: number; total: number } | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [uploadedDocs, setUploadedDocs] = useState<Documento[]>([])
@@ -186,8 +192,17 @@ export const CameraUpload = ({
         day: '2-digit',
       })
 
+      // Las que fallen quedan acá para reintentarlas sin volver a subir las
+      // que ya pasaron. Antes, si la señal se cortaba en la foto 5 de 8, las
+      // 1-4 ya estaban comprometidas en la base y en Storage, pero setFotos([])
+      // nunca se ejecutaba: el usuario volvía a tocar "Enviar" con las 8 y
+      // terminaba con 4 documentos duplicados en el pasillo del coordinador.
+      const fallidas: typeof fotos = []
+      let ultimoError: unknown = null
+
       // Procesar cada foto o PDF
       for (let i = 0; i < fotos.length; i++) {
+        try {
         const { file, esPDF, miniaturaBlob } = fotos[i]
         const cargo = formatearCargo(usuarioRol)
         const titulo = `${usuarioNombre}${cargo ? ` (${cargo})` : ''} · ${fechaLabel} (${i + 1}/${fotos.length})`
@@ -203,7 +218,11 @@ export const CameraUpload = ({
 
         // 3. Subir la "foto": la imagen original, o si es un PDF ya existente,
         // la miniatura generada de su primera página.
-        const fotoBlob = esPDF ? miniaturaBlob! : file
+        const fotoOriginal = esPDF ? miniaturaBlob! : file
+        // Se comprime antes de subir: una foto de cámara pesa 3-5 MB y
+        // viajaba intacta. Con DOCUMENTO_ESCANEADO baja a ~1,5 MB sin
+        // comprometer la legibilidad del texto ni los sellos.
+        const fotoBlob = await comprimirImagen(fotoOriginal, DOCUMENTO_ESCANEADO)
         const fotoNombre = esPDF ? `${file.name.replace(/\.pdf$/i, '')}_miniatura.jpg` : file.name
         const fotoPath = `fotos/${contratoId}/${Date.now()}_${i}_${fotoNombre}`
         const fotoResult = await storage.uploadFoto('documentos', fotoPath, fotoBlob)
@@ -238,22 +257,41 @@ export const CameraUpload = ({
         })
 
         nuevosDocumentos.push(documento)
+        setProgreso({ hechas: nuevosDocumentos.length, total: fotos.length })
+        } catch (err) {
+          ultimoError = err
+          fallidas.push(fotos[i])
+        }
       }
 
       setUploadedDocs(nuevosDocumentos)
+      setCurrentPhotoIndex(0)
+
+      if (fallidas.length > 0) {
+        // Solo quedan las que faltan: reintentar no vuelve a subir las que
+        // ya se guardaron, así que no se generan duplicados.
+        setFotos(fallidas)
+        setUploadError(
+          `Se cargaron ${nuevosDocumentos.length} de ${nuevosDocumentos.length + fallidas.length} documentos. ` +
+            `${fallidas.length === 1 ? 'Queda 1 pendiente' : `Quedan ${fallidas.length} pendientes`} — ` +
+            `${traducirError(ultimoError, 'vuelve a intentarlo cuando tengas mejor señal.')}`
+        )
+        return
+      }
+
       setUploadSuccess(true)
       setFotos([])
-      setCurrentPhotoIndex(0)
 
       // Limpiar después de 5 segundos
       setTimeout(() => {
         setUploadSuccess(false)
       }, 5000)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = traducirError(err, 'Error desconocido')
       setUploadError(msg)
     } finally {
       setIsUploading(false)
+      setProgreso(null)
     }
   }
 
@@ -299,8 +337,11 @@ export const CameraUpload = ({
             {/* Miniatura */}
             <div className="flex gap-2 overflow-x-auto flex-1 px-2">
               {fotos.map((foto, idx) => (
-                <div
+                <button
                   key={idx}
+                  type="button"
+                  aria-label={`Ver documento ${idx + 1} de ${fotos.length}`}
+                  aria-current={idx === currentPhotoIndex}
                   className={`flex-shrink-0 w-16 h-16 rounded-lg cursor-pointer overflow-hidden border-2 transition-all relative ${
                     idx === currentPhotoIndex
                       ? 'border-blue-600 ring-2 ring-blue-400'
@@ -318,7 +359,7 @@ export const CameraUpload = ({
                     alt={`Miniatura ${idx + 1}`}
                     className="w-full h-full object-cover"
                   />
-                </div>
+                </button>
               ))}
             </div>
 
@@ -335,8 +376,17 @@ export const CameraUpload = ({
           {/* Botón eliminar foto actual */}
           <button
             type="button"
-            onClick={() => eliminarFoto(currentPhotoIndex)}
-            className="w-full text-sm text-red-600 hover:text-red-700 font-semibold py-2 border border-red-300 rounded-lg hover:bg-red-50"
+            onClick={() => {
+              // Una foto recién capturada no está subida a ninguna parte: si
+              // se borra por error hay que volver a caminar al punto. El
+              // resto de acciones destructivas de la app sí confirman; esta
+              // era la única que no lo hacía.
+              const ok = window.confirm(
+                '¿Eliminar este documento del carrusel? La foto no está guardada en ninguna parte todavía.'
+              )
+              if (ok) eliminarFoto(currentPhotoIndex)
+            }}
+            className="w-full text-sm text-red-600 hover:text-red-700 font-semibold py-3 border border-red-300 rounded-lg hover:bg-red-50"
           >
             🗑️ Eliminar este documento
           </button>
@@ -407,7 +457,9 @@ export const CameraUpload = ({
             className="w-full bg-green-600 text-white font-semibold py-3 rounded-lg hover:bg-green-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
           >
             {isUploading || isGenerating
-              ? `Subiendo ${fotos.length} documentos...`
+              ? progreso
+                ? `Subiendo… ${progreso.hechas} de ${progreso.total} listos`
+                : `Preparando ${fotos.length} documento${fotos.length > 1 ? 's' : ''}…`
               : `✓ Enviar ${fotos.length} documento${fotos.length > 1 ? 's' : ''} al pasillo de revisión`}
           </button>
 

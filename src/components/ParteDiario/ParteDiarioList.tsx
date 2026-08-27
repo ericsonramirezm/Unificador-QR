@@ -4,6 +4,7 @@ import { Faena, FAENA_LABELS, ParteDiario, ParteDiarioEstado, Usuario } from '@/
 import { ParteDiarioForm } from './ParteDiarioForm'
 import { ParteDiarioDetalle } from './ParteDiarioDetalle'
 import { puedeCrear, puedeEditar, puedeEliminar } from './permisos'
+import { traducirError } from '@lib/errores'
 
 interface ParteDiarioListProps {
   usuario: Usuario
@@ -38,7 +39,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
       const data = await db.obtenerPartesDiarios(contrato.id)
       setPartes(data as ParteDiario[])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudieron cargar los partes diarios')
+      setError(traducirError(err, 'No se pudieron cargar los partes diarios'))
     } finally {
       setIsLoading(false)
     }
@@ -57,7 +58,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
       await db.eliminarParteDiario(parte.id)
       cargarPartes()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el Daily Report')
+      setError(traducirError(err, 'No se pudo eliminar el Daily Report'))
     }
   }
 

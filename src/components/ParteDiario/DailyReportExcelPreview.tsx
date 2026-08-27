@@ -9,6 +9,7 @@ import {
 } from '@/types/index'
 import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
 import { useState } from 'react'
+import { traducirError } from '@lib/errores'
 
 interface DailyReportExcelPreviewProps {
   parte: ParteDiario
@@ -56,7 +57,7 @@ export const DailyReportExcelPreview = ({ parte, contrato, onCerrar }: DailyRepo
       const blob = await generarExcelParteDiario(parte)
       descargarBlob(blob, nombreArchivoParteDiario(parte))
     } catch (err) {
-      setErrorDescarga(err instanceof Error ? err.message : 'No se pudo generar el Excel')
+      setErrorDescarga(traducirError(err, 'No se pudo generar el Excel'))
     } finally {
       setIsGenerando(false)
     }

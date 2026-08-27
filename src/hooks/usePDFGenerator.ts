@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 import jsPDF from 'jspdf'
+import { traducirError } from '@lib/errores'
+import { DOCUMENTO_ESCANEADO } from '@lib/comprimirImagen'
 
 export const usePDFGenerator = () => {
   const [isGenerating, setIsGenerating] = useState(false)
@@ -37,14 +39,26 @@ export const usePDFGenerator = () => {
         // (Antes intentamos también rotarla a mano según el tag EXIF, pero
         // el navegador YA la había corregido al dibujarla — la doble
         // corrección la dejaba girada de más.)
+        //
+        // Además se reduce el tamaño: antes la imagen se incrustaba a
+        // resolución natural de cámara (4000 px o más), lo que dejaba PDFs
+        // de varios MB por documento aunque en una hoja Letter no se
+        // aprecie ninguna diferencia. DOCUMENTO_ESCANEADO es conservador
+        // justamente para no comprometer la letra chica ni los sellos.
+        const ladoMayor = Math.max(img.naturalWidth, img.naturalHeight)
+        const escala =
+          ladoMayor > DOCUMENTO_ESCANEADO.ladoMayorMax ? DOCUMENTO_ESCANEADO.ladoMayorMax / ladoMayor : 1
+
         const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
+        canvas.width = Math.round(img.naturalWidth * escala)
+        canvas.height = Math.round(img.naturalHeight * escala)
         const ctx = canvas.getContext('2d')
         if (!ctx) throw new Error('No se pudo preparar el lienzo para procesar la foto')
-        ctx.drawImage(img, 0, 0)
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
-        const imagenFinalUrl = canvas.toDataURL('image/jpeg', 0.92)
+        const imagenFinalUrl = canvas.toDataURL('image/jpeg', DOCUMENTO_ESCANEADO.calidad)
         const anchoImg = canvas.width
         const altoImg = canvas.height
 
@@ -98,7 +112,7 @@ export const usePDFGenerator = () => {
 
         return pdfDoc.output('blob')
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'Error desconocido al generar el PDF'
+        const errorMsg = traducirError(err, 'Error desconocido al generar el PDF')
         setError(errorMsg)
         throw err instanceof Error ? err : new Error(errorMsg)
       } finally {

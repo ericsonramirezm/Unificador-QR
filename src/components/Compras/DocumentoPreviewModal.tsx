@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { leerExcelParaPreview, type HojaPreview } from '@lib/previsualizarDocumento'
 import { renderizarPaginasPDF } from '@lib/renderizarPDF'
+import { traducirError } from '@lib/errores'
 
 interface DocumentoPreviewModalProps {
   documento: File
@@ -35,7 +36,7 @@ export const DocumentoPreviewModal = ({ documento, onCerrar }: DocumentoPreviewM
           if (!cancelado) setHojas(resultado)
         }
       } catch (err) {
-        if (!cancelado) setError(err instanceof Error ? err.message : 'No se pudo generar la vista previa')
+        if (!cancelado) setError(traducirError(err, 'No se pudo generar la vista previa'))
       } finally {
         if (!cancelado) setIsCargando(false)
       }

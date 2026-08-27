@@ -6,6 +6,7 @@ import { useCompilarDia } from '@hooks/useCompilarDia'
 import { generarQRConFecha } from '@lib/generarQR'
 import { formatearCargo } from '@lib/formato'
 import { ordenarDocumentos } from '@lib/orden'
+import { traducirError } from '@lib/errores'
 
 interface HistorialAprobadosProps {
   usuario?: Usuario
@@ -121,7 +122,7 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
       const docs = await db.obtenerDocumentos({ estado: DocumentStatus.APROBADO })
       setDocumentos(docs || [])
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al cargar el historial'
+      const msg = traducirError(err, 'Error al cargar el historial')
       setError(msg)
     } finally {
       setIsLoading(false)
@@ -182,18 +183,26 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
     const qr = qrPorDia[dia.fecha]
     if (qr?.estado !== 'listo') return
 
-    const res = await fetch(qr.url)
-    const blob = await res.blob()
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = `Compilado_${dia.fecha}.pdf`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    // Revocar de inmediato puede cortar la descarga en algunos navegadores
-    // si el archivo es grande — se le da un margen antes de liberar la URL.
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+    // Sin este try/catch, con mala señal el fetch rechaza, la promesa queda
+    // sin manejar y el usuario toca "⬇️ PDF" sin que pase absolutamente
+    // nada: ni error, ni spinner, ni pista de qué ocurrió.
+    try {
+      const res = await fetch(qr.url)
+      if (!res.ok) throw new Error(`El servidor respondió ${res.status}`)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `Compilado_${dia.fecha}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      // Revocar de inmediato puede cortar la descarga en algunos navegadores
+      // si el archivo es grande — se le da un margen antes de liberar la URL.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+    } catch (err) {
+      setError(traducirError(err, 'No se pudo descargar el PDF del día.'))
+    }
   }
 
   // Borra uno o varios documentos por completo (registro + archivos en Storage),
@@ -228,7 +237,7 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
 
       await cargar()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al eliminar'
+      const msg = traducirError(err, 'Error al eliminar')
       setEliminarError(msg)
     } finally {
       setEliminando(false)
@@ -247,21 +256,28 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
     document.body.removeChild(a)
   }
 
-  // Al cargar el historial: primero revisa qué días ya tienen un compilado
-  // vigente en caché (nada aprobado después de la última vez que se generó)
-  // y solo recompila los que faltan o cambiaron — uno por uno, para no
-  // saturar Storage con subidas simultáneas.
+  // Al cargar el historial solo se LEE el caché: para cada día que ya tenga
+  // un compilado vigente se regenera la imagen del QR, que es instantánea y
+  // no cuesta red. Los días sin compilar quedan con un botón para generarlos.
+  //
+  // Antes este efecto compilaba automáticamente todos los días pendientes:
+  // descargaba cada PDF del día, los fusionaba en el celular y subía el
+  // resultado. Con diez documentos, un solo día son decenas de MB de bajada
+  // más otro tanto de subida — por datos móviles, sin avisar y sin poder
+  // cancelar. Y se disparaba solo en el caso más común: aprobar un documento
+  // invalida el compilado del día, así que bastaba con abrir el Historial.
   useEffect(() => {
     if (!contrato) return
 
     let cancelado = false
 
-    const generarPendientes = async () => {
+    const cargarDesdeCache = async () => {
       let cache: Awaited<ReturnType<typeof db.obtenerCompiladosDia>> = []
       try {
         cache = await db.obtenerCompiladosDia(contrato.id)
       } catch {
-        // si falla la consulta del caché, simplemente se recompila todo
+        // Sin caché disponible, todos los días quedan como "por generar".
+        return
       }
       const cachePorFecha = new Map(cache.map((c) => [c.fecha, c]))
 
@@ -274,24 +290,20 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
           const vigente =
             cacheDia && new Date(cacheDia.ultima_aprobacion) >= new Date(ultimaAprobacionDe(dia.documentos))
 
-          if (vigente && cacheDia) {
-            // Reusa el PDF ya compilado — solo hay que regenerar la imagen del QR (instantáneo)
-            try {
-              const qrDataUrl = await generarQRConFecha(cacheDia.url, formatearFechaCorta(dia.fecha), 240)
-              if (cancelado) return
-              setQrPorDia((prev) => ({ ...prev, [dia.fecha]: { estado: 'listo', url: cacheDia.url, qrDataUrl } }))
-              continue
-            } catch {
-              // si falla generar el QR desde el caché, recompila desde cero
-            }
-          }
+          if (!vigente || !cacheDia) continue
 
-          await generarQRDia(dia)
+          try {
+            const qrDataUrl = await generarQRConFecha(cacheDia.url, formatearFechaCorta(dia.fecha), 240)
+            if (cancelado) return
+            setQrPorDia((prev) => ({ ...prev, [dia.fecha]: { estado: 'listo', url: cacheDia.url, qrDataUrl } }))
+          } catch {
+            // El QR se puede regenerar después con el botón.
+          }
         }
       }
     }
 
-    generarPendientes()
+    cargarDesdeCache()
 
     return () => {
       cancelado = true
@@ -383,22 +395,51 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
                         <div className="w-12 h-12 flex-shrink-0 border-2 border-slate-800 rounded-md flex items-center justify-center self-center overflow-hidden bg-white">
                           {qr?.estado === 'listo' ? (
                             <img src={qr.qrDataUrl} alt="QR del día" className="w-full h-full object-contain" />
+                          ) : qr?.estado === 'generando' ? (
+                            <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" />
                           ) : qr?.estado === 'error' ? (
                             <span className="text-red-500 text-xs">!</span>
-                          ) : contrato ? (
-                            <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" />
                           ) : (
                             <span className="text-slate-300 text-xs">—</span>
                           )}
                         </div>
                       </button>
 
+                      {/* Los días sin compilado vigente ya no se generan solos
+                          (consumían datos móviles sin avisar): se ofrece el
+                          botón y el usuario decide cuándo gastar la conexión. */}
+                      {contrato && !qr && (
+                        <button
+                          type="button"
+                          onClick={() => generarQRDia(dia)}
+                          className="w-full border-t border-slate-100 text-xs font-semibold text-blue-700 py-2.5 hover:bg-blue-50"
+                        >
+                          Generar QR del día
+                        </button>
+                      )}
+
+                      {qr?.estado === 'generando' && (
+                        <p className="w-full border-t border-slate-100 text-xs text-slate-400 py-2.5 text-center">
+                          Compilando…
+                        </p>
+                      )}
+
+                      {qr?.estado === 'error' && (
+                        <button
+                          type="button"
+                          onClick={() => generarQRDia(dia)}
+                          className="w-full border-t border-slate-100 text-xs font-semibold text-red-600 py-2.5 hover:bg-red-50"
+                        >
+                          Falló — reintentar
+                        </button>
+                      )}
+
                       {qr?.estado === 'listo' && (
                         <div className="flex border-t border-slate-100">
                           <button
                             type="button"
                             onClick={() => descargarPDFDia(dia)}
-                            className="flex-1 text-xs font-semibold text-slate-600 py-2 hover:bg-slate-50"
+                            className="flex-1 text-xs font-semibold text-slate-600 py-2.5 hover:bg-slate-50"
                           >
                             ⬇️ PDF
                           </button>
@@ -406,7 +447,7 @@ export const HistorialAprobados = ({ usuario, contrato }: HistorialAprobadosProp
                           <button
                             type="button"
                             onClick={() => descargarQRImagen(dia)}
-                            className="flex-1 text-xs font-semibold text-slate-600 py-2 hover:bg-slate-50"
+                            className="flex-1 text-xs font-semibold text-slate-600 py-2.5 hover:bg-slate-50"
                           >
                             ⬇️ QR
                           </button>

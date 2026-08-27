@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import jsPDF from 'jspdf'
 import { Documento } from '@/types/index'
 import { formatearCargo } from '@lib/formato'
+import { traducirError } from '@lib/errores'
 
 interface ContextoCompilado {
   fecha: string // YYYY-MM-DD
@@ -128,7 +129,7 @@ export function useCompilarDia() {
       const mergedBytes = await mergedPdf.save()
       return new Blob([mergedBytes as BlobPart], { type: 'application/pdf' })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al compilar el PDF del día'
+      const msg = traducirError(err, 'Error al compilar el PDF del día')
       setError(msg)
       throw err instanceof Error ? err : new Error(msg)
     } finally {

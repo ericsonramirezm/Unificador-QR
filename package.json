@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "reset-password": "node scripts/restablecer-clave.mjs",
-    "procesar-reportes-existentes": "tsx scripts/procesarReportesExistentes.ts"
+    "procesar-reportes-existentes": "tsx scripts/procesarReportesExistentes.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.1",
@@ -34,12 +36,18 @@
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-react": "^4.1.1",
     "autoprefixer": "^10.4.16",
+    "eslint": "^8.57.1",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-hooks": "^4.6.2",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.6",
     "tsx": "^4.23.12",
     "typescript": "^5.2.2",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "vitest": "^1.6.1"
   }
 }

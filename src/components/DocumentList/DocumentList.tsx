@@ -1,19 +1,23 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Documento, DocumentStatus, UserRole, Usuario, Contrato } from '@/types/index'
-import { db, storage } from '@lib/supabase'
+import { db, storage, type FiltrosDocumentos } from '@lib/supabase'
 import { useCompilarDia } from '@hooks/useCompilarDia'
 import { generarQRConFecha } from '@lib/generarQR'
-import { formatearCargo } from '@lib/formato'
+import { formatearCargo, formatearEstadoDocumento } from '@lib/formato'
 import { ordenarDocumentos } from '@lib/orden'
 import { girarPaginasPDF, girarImagen } from '@lib/girarArchivo'
 import { CameraUpload } from '@components/Upload/CameraUpload'
 import { RelojPasillo } from '@components/DocumentList/RelojPasillo'
+import { traducirError } from '@lib/errores'
 
 interface DocumentListProps {
   usuario?: Usuario
   contrato?: Contrato | null
 }
+
+/** Cuántos documentos trae cada tanda del pasillo de revisión. */
+const PAGINA = 200
 
 interface GrupoPorDia {
   fecha: string // YYYY-MM-DD
@@ -113,6 +117,11 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filtroEstado, setFiltroEstado] = useState<DocumentStatus | ''>('')
+  // Paginación: antes esta consulta no tenía límite, así que el pasillo
+  // crecía indefinidamente con el tiempo. PAGINA cubre de sobra varios días
+  // de trabajo; si hay más, aparece "Cargar más" al final.
+  const [limite, setLimite] = useState(PAGINA)
+  const [hayMas, setHayMas] = useState(false)
 
   // Modal de revisión: fecha + persona cuyos documentos se están revisando
   const [revisando, setRevisando] = useState<{ fecha: string; usuarioId: string; nombre: string; cargo: string } | null>(null)
@@ -154,15 +163,21 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
 
   useEffect(() => {
     cargarDocumentos()
-  }, [filtroEstado, usuario?.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroEstado, usuario?.id, contrato?.id, limite])
 
   const cargarDocumentos = async () => {
     setIsLoading(true)
     setError(null)
 
     try {
-      const filtros: any = {}
+      const filtros: FiltrosDocumentos = { limite }
       if (filtroEstado) filtros.estado = filtroEstado
+
+      // Sin este filtro, en cuanto exista un segundo contrato el pasillo de
+      // revisión mezclaría documentos de ambos (y el compilado del día
+      // también). Hoy no se nota porque hay uno solo.
+      if (contrato?.id) filtros.contrato_id = contrato.id
 
       // APR/Supervisor/Consultor ven solo sus documentos
       if (!esCoordinador) {
@@ -171,8 +186,10 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
 
       const docs = await db.obtenerDocumentos(filtros)
       setDocumentos(docs || [])
+      // Si volvió exactamente el máximo pedido, es probable que haya más.
+      setHayMas((docs?.length ?? 0) >= limite)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al cargar documentos'
+      const msg = traducirError(err, 'Error al cargar documentos')
       setError(msg)
     } finally {
       setIsLoading(false)
@@ -200,7 +217,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
 
       await cargarDocumentos()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al aprobar el documento'
+      const msg = traducirError(err, 'Error al aprobar el documento')
       setModalError(msg)
     } finally {
       setAprobandoId(null)
@@ -236,7 +253,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
       // si el archivo es grande — se le da un margen antes de liberar la URL.
       setTimeout(() => URL.revokeObjectURL(url), 5000)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al generar el PDF del día'
+      const msg = traducirError(err, 'Error al generar el PDF del día')
       setCompilarError({ fecha: grupo.fecha, mensaje: msg })
     } finally {
       setCompilando(null)
@@ -293,7 +310,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
       setQrGenerados((prev) => ({ ...prev, [grupo.fecha]: { url, qrDataUrl, ultimaAprobacion } }))
       setQrModal({ fecha: grupo.fecha, url, qrDataUrl })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al generar el QR del día'
+      const msg = traducirError(err, 'Error al generar el QR del día')
       setCompilarError({ fecha: grupo.fecha, mensaje: msg })
     } finally {
       setCompilando(null)
@@ -322,7 +339,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
 
       await cargarDocumentos()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al eliminar'
+      const msg = traducirError(err, 'Error al eliminar')
       setEliminarError(msg)
     } finally {
       setEliminando(false)
@@ -362,7 +379,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
       await invalidarCacheDelDia(grupo.fecha)
       await cargarDocumentos()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al reordenar'
+      const msg = traducirError(err, 'Error al reordenar')
       setOrdenError(msg)
     } finally {
       setMoviendo(false)
@@ -406,7 +423,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
       await invalidarCacheDelDia(doc.fecha_creacion.slice(0, 10))
       await cargarDocumentos()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al girar el documento'
+      const msg = traducirError(err, 'Error al girar el documento')
       setOrdenError(msg)
     } finally {
       setGirandoId(null)
@@ -701,7 +718,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                               <span
                                 className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${estadoPillClase(doc.estado)}`}
                               >
-                                {doc.estado}
+                                {formatearEstadoDocumento(doc.estado)}
                               </span>
                             </td>
                           </tr>
@@ -713,6 +730,17 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
               </div>
             )
           })}
+
+          {hayMas && (
+            <button
+              type="button"
+              onClick={() => setLimite((n) => n + PAGINA)}
+              disabled={isLoading}
+              className="w-full py-3 text-sm font-semibold text-blue-700 bg-white border border-slate-200 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+            >
+              {isLoading ? 'Cargando…' : 'Cargar documentos más antiguos'}
+            </button>
+          )}
         </div>
       )}
 
@@ -771,7 +799,7 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
                       <span
                         className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${estadoPillClase(doc.estado)}`}
                       >
-                        {doc.estado}
+                        {formatearEstadoDocumento(doc.estado)}
                       </span>
                     </div>
                   </div>
@@ -812,7 +840,10 @@ export const DocumentList = ({ usuario, contrato }: DocumentListProps) => {
       <Dialog.Root open={!!qrModal} onOpenChange={(open) => !open && setQrModal(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/50 z-40" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-white rounded-lg shadow-xl z-50 p-6 text-center">
+          {/* max-h + overflow: sin esto, en un celular chico el modal mide
+              más que la pantalla y los botones de descargar y regenerar
+              quedan cortados fuera, sin forma de alcanzarlos. */}
+          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm max-h-[85vh] overflow-y-auto bg-white rounded-lg shadow-xl z-50 p-6 text-center">
             <div className="flex items-center justify-between mb-4">
               <Dialog.Title className="text-lg font-bold text-slate-900">
                 {qrModal && `QR — ${formatearFechaGrupo(qrModal.fecha)}`}

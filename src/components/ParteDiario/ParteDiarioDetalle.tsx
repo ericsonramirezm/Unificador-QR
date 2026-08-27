@@ -4,6 +4,8 @@ import { FAENA_LABELS, HH_TURNO_POR_FAENA, ParteDiario, ParteDiarioEstado, UserR
 import { descargarBlob, generarExcelParteDiario, nombreArchivoParteDiario } from '@lib/generarExcelParteDiario'
 import { puedeEditar, puedeEliminar } from './permisos'
 import { DailyReportExcelPreview } from './DailyReportExcelPreview'
+import { traducirError } from '@lib/errores'
+import { formatearEstadoParte } from '@lib/formato'
 
 interface ParteDiarioDetalleProps {
   usuario: Usuario
@@ -48,7 +50,7 @@ export const ParteDiarioDetalle = ({ usuario, contrato, parteId, onVolver, onEdi
       const data = await db.obtenerParteDiario(parteId)
       setParte(data as ParteDiario)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cargar el Daily Report')
+      setError(traducirError(err, 'No se pudo cargar el Daily Report'))
     } finally {
       setIsLoading(false)
     }
@@ -68,7 +70,7 @@ export const ParteDiarioDetalle = ({ usuario, contrato, parteId, onVolver, onEdi
       setParte(actualizado as ParteDiario)
       setComentario('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el comentario')
+      setError(traducirError(err, 'No se pudo guardar el comentario'))
     } finally {
       setIsComentando(false)
     }
@@ -82,7 +84,7 @@ export const ParteDiarioDetalle = ({ usuario, contrato, parteId, onVolver, onEdi
       const blob = await generarExcelParteDiario(parte)
       descargarBlob(blob, nombreArchivoParteDiario(parte))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo generar el Excel')
+      setError(traducirError(err, 'No se pudo generar el Excel'))
     } finally {
       setIsGenerandoExcel(false)
     }
@@ -99,7 +101,7 @@ export const ParteDiarioDetalle = ({ usuario, contrato, parteId, onVolver, onEdi
       await db.eliminarParteDiario(parte.id)
       onVolver()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el Daily Report')
+      setError(traducirError(err, 'No se pudo eliminar el Daily Report'))
       setIsEliminando(false)
     }
   }
@@ -140,7 +142,7 @@ export const ParteDiarioDetalle = ({ usuario, contrato, parteId, onVolver, onEdi
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{parte.estado}</span>
+            <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{formatearEstadoParte(parte.estado)}</span>
             {onEditar && puedeEditar(usuario, parte) && (
               <button
                 onClick={() => onEditar(parte)}

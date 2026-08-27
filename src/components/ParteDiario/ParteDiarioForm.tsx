@@ -15,6 +15,9 @@ import {
 } from '@/types/index'
 import { FotoPendiente, GestorFotos } from './GestorFotos'
 import { DailyReportExcelPreview } from './DailyReportExcelPreview'
+import { traducirError } from '@lib/errores'
+import { useAutoguardado, leerBorrador, haceCuanto } from '@hooks/useBorradorLocal'
+import { hhDeFila, hhTotales, permisoDescanso } from '@lib/calculosHH'
 
 interface ParteDiarioFormProps {
   usuario: Usuario
@@ -182,8 +185,67 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
   // lo que necesita, igual que ParteDiarioDetalle.
   const [parteGuardada, setParteGuardada] = useState<ParteDiario | null>(null)
   const [mostrarVistaPrevia, setMostrarVistaPrevia] = useState(false)
+  // Id del reporte si un intento anterior ya alcanzó a crearlo — ver el
+  // comentario en guardar(). Evita que un reintento inserte por segunda vez.
+  const [parteCreadoId, setParteCreadoId] = useState<string | null>(null)
 
   const numActividades = Math.min(Math.max(actividades.length, 1), MAX_ACTIVIDADES)
+
+  // ---------- Autoguardado local ----------
+  // Solo para reportes nuevos: al editar uno existente, el original ya está
+  // a salvo en el servidor y un borrador local solo confundiría.
+  const claveBorrador = `daily:${contrato?.id ?? 'sin-contrato'}:${usuario.id}`
+
+  const datosBorrador = {
+    fecha,
+    condicionClimatica,
+    faena,
+    actividades,
+    manoObraDirecta,
+    manoObraIndirecta,
+    maquinaria,
+    jornada,
+    hhDirectasProgramado,
+    hhIndirectasProgramado,
+    comentarioContratistaAutor,
+    comentarioContratista,
+    // Las fotos NO van: son objetos File, que no se pueden serializar. Se
+    // avisa al recuperar el borrador.
+  }
+
+  const { guardadoEn, limpiar: limpiarBorrador } = useAutoguardado(
+    claveBorrador,
+    datosBorrador,
+    !editando && faenaElegida && !parteGuardada
+  )
+
+  const [borradorDisponible, setBorradorDisponible] = useState(() =>
+    editando ? null : leerBorrador<typeof datosBorrador>(claveBorrador)
+  )
+
+  const recuperarBorrador = () => {
+    if (!borradorDisponible) return
+    const d = borradorDisponible.datos
+    setFecha(d.fecha)
+    setCondicionClimatica(d.condicionClimatica)
+    setFaena(d.faena)
+    setFaenaElegida(true)
+    setActividades(d.actividades)
+    setManoObraDirecta(d.manoObraDirecta)
+    setManoObraIndirecta(d.manoObraIndirecta)
+    setMaquinaria(d.maquinaria)
+    setJornada(d.jornada)
+    setHhDirectasProgramado(d.hhDirectasProgramado)
+    setHhIndirectasProgramado(d.hhIndirectasProgramado)
+    setComentarioContratistaAutor(d.comentarioContratistaAutor)
+    setComentarioContratista(d.comentarioContratista)
+    setBorradorDisponible(null)
+  }
+
+  const descartarBorrador = () => {
+    limpiarBorrador()
+    setBorradorDisponible(null)
+  }
 
   useEffect(() => {
     // En modo edición el N° de reporte ya viene fijo desde parteExistente —
@@ -193,7 +255,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
     setIsLoading(true)
     db.obtenerSiguienteNumeroParte(contrato.id)
       .then(setNumeroReporte)
-      .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo obtener el N° de reporte'))
+      .catch((err) => setError(traducirError(err, 'No se pudo obtener el N° de reporte')))
       .finally(() => setIsLoading(false))
   }, [contrato?.id, editando])
 
@@ -256,7 +318,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
 
   // ---------- Totales calculados (mismas fórmulas que el Excel) ----------
   const totalHhDirectas = sumar(manoObraDirecta.map((f) => sumar(calcularHorasCargo(f))))
-  const totalHhIndirectas = sumar(manoObraIndirecta.map((f) => HH_TURNO_POR_FAENA[faena] * f.operativos))
+  const totalHhIndirectas = hhTotales(faena, manoObraIndirecta)
   const totalHm = sumar(maquinaria.map((f) => sumar(f.horas.slice(0, numActividades))))
 
   // Suma de "Cantidad" (HH x actividad) de Actividades Ejecutadas — es
@@ -331,7 +393,18 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
 
       let parte: any
 
-      if (editando && parteExistente) {
+      // parteCreadoId: si un intento anterior YA creó el reporte y falló
+      // después (subiendo fotos), este reintento tiene que ACTUALIZAR ese
+      // reporte, no insertar otro. Sin esto, el segundo intento chocaba
+      // contra la restricción única de (contrato, número de reporte) y el
+      // usuario quedaba atrapado: no podía guardar nunca más desde este
+      // formulario, y perdía todo lo capturado.
+      if (parteCreadoId && !editando) {
+        parte = await db.actualizarParteDiario(parteCreadoId, {
+          ...camposComunes,
+          estado: estadoFinal,
+        })
+      } else if (editando && parteExistente) {
         // Al editar NO se tocan las columnas *_acumuladas: recalcularlas
         // implicaría además recalcular en cascada todos los reportes
         // posteriores a este (que heredan el acumulado), lo cual queda
@@ -358,6 +431,9 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
           estado: estadoFinal,
           creado_por: usuario.id,
         })
+        // El reporte ya existe en la base. A partir de acá, cualquier fallo
+        // debe reintentarse como actualización, nunca como inserción nueva.
+        setParteCreadoId(parte.id)
       }
 
       // Fotos: unifica las nuevas (traen "file", hay que subirlas a Storage)
@@ -366,25 +442,49 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
       // que el usuario haya cambiado el orden, el pie de foto, o las haya
       // quitado). El resultado reemplaza por completo el arreglo "fotos" del
       // parte, así que una foto quitada en el formulario también se quita acá.
+      //
+      // Cada foto se sube dentro de su propio try/catch. Antes, una sola
+      // foto fallida (señal intermitente en faena, que es lo normal) hacía
+      // salir del bucle entero: el reporte quedaba guardado con fotos: [],
+      // las anteriores quedaban huérfanas en Storage, y el mensaje de error
+      // no decía que el reporte SÍ se había guardado.
       const fotosFinal: { url: string; caption: string }[] = []
+      const fotosPendientes: FotoPendiente[] = []
+
       for (let i = 0; i < fotos.length; i++) {
         const foto = fotos[i]
         if (foto.file) {
-          const path = `partes-diarios/${contrato.id}/${parte.id}/${Date.now()}-${i}-${foto.file.name}`
-          await storage.uploadFoto('documentos', path, foto.file)
-          const url = await storage.getPublicUrl('documentos', path)
-          fotosFinal.push({ url, caption: foto.caption })
+          try {
+            const path = `partes-diarios/${contrato.id}/${parte.id}/${Date.now()}-${i}-${foto.file.name}`
+            await storage.uploadFoto('documentos', path, foto.file)
+            const url = await storage.getPublicUrl('documentos', path)
+            fotosFinal.push({ url, caption: foto.caption })
+          } catch {
+            // Se guarda para reintentarla; el resto del reporte igual se salva.
+            fotosPendientes.push(foto)
+          }
         } else if (foto.url) {
           fotosFinal.push({ url: foto.url, caption: foto.caption })
         }
       }
-      // Al crear, solo hace falta este segundo update si hay fotos que
-      // subir (el insert ya dejó fotos: []). Al editar, siempre hay que
-      // guardar el arreglo final aunque haya quedado vacío, para reflejar
-      // fotos que el usuario haya quitado.
-      if (editando || fotosFinal.length > 0) {
+
+      // Siempre se guarda lo que sí subió, aunque algunas hayan fallado.
+      if (editando || parteCreadoId || fotosFinal.length > 0) {
         await db.actualizarParteDiario(parte.id, { fotos: fotosFinal })
       }
+
+      if (fotosPendientes.length > 0) {
+        // El formulario queda abierto con solo las fotos que faltan, para
+        // que "Guardar" de nuevo reintente únicamente esas.
+        setFotos([...fotosFinal.map((f) => ({ url: f.url, caption: f.caption, preview: f.url })), ...fotosPendientes])
+        setError(
+          `El reporte se guardó, pero ${fotosPendientes.length} foto${fotosPendientes.length === 1 ? '' : 's'} no se pudo subir por problemas de conexión. ` +
+            'Vuelve a tocar Guardar cuando tengas señal para reintentar solo esas.'
+        )
+        return
+      }
+
+      limpiarBorrador()
 
       // crearParteDiario/actualizarParteDiario no traen usuario_creador ni
       // el arreglo de fotos final (si se acaban de subir) — se vuelve a
@@ -393,7 +493,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
       const parteCompleto = await db.obtenerParteDiario(parte.id)
       setParteGuardada(parteCompleto as ParteDiario)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el Daily Report')
+      setError(traducirError(err, 'No se pudo guardar el Daily Report'))
     } finally {
       setIsSaving(null)
     }
@@ -487,7 +587,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
         </Dialog.Root>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-xl font-bold text-slate-900">
             {editando ? 'Editar Daily Report' : 'Nuevo Daily Report'}
@@ -496,10 +596,44 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
             {contrato?.codigo} · {contrato?.nombre}
           </p>
         </div>
-        <span className="text-sm font-mono text-slate-500">
-          {isLoading ? 'Report N° …' : `Report N° ${String(numeroReporte).padStart(3, '0')}`}
-        </span>
+        <div className="text-right">
+          <span className="block text-sm font-mono text-slate-500">
+            {isLoading ? 'Report N° …' : `Report N° ${String(numeroReporte).padStart(3, '0')}`}
+          </span>
+          {guardadoEn && (
+            <span className="block text-xs text-slate-400 mt-0.5">Borrador guardado en este equipo ✓</span>
+          )}
+        </div>
       </div>
+
+      {/* Recuperación de un borrador anterior: aparece si el navegador se
+          cerró (o descartó la pestaña) con trabajo sin guardar. */}
+      {borradorDisponible && !editando && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <p className="text-sm font-semibold text-amber-900">
+            Tienes un Daily Report a medio llenar de {haceCuanto(borradorDisponible.guardadoEn)}
+          </p>
+          <p className="text-xs text-amber-800/80 mt-1">
+            Puedes seguir donde lo dejaste. Las fotos no se guardan en el borrador, hay que volver a cargarlas.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <button
+              type="button"
+              onClick={recuperarBorrador}
+              className="px-4 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700"
+            >
+              Recuperar lo que llevaba
+            </button>
+            <button
+              type="button"
+              onClick={descartarBorrador}
+              className="px-4 py-2.5 text-sm font-semibold text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-100"
+            >
+              Empezar de cero
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{error}</div>
@@ -669,7 +803,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
                     />
                   </td>
                   <td className="py-1 px-1 text-right text-slate-400 font-mono text-xs">
-                    {fila.contratados - fila.operativos}
+                    {permisoDescanso(fila)}
                   </td>
                   {calcularHorasCargo(fila).map((horas, actIndex) => (
                     <td key={actIndex} className="py-1 px-1 text-right font-mono text-xs text-slate-500">
@@ -810,9 +944,15 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
                     <input type="number" value={fila.operativos || ''} onChange={(e) => actualizarIndirecta(index, 'operativos', e.target.value)} className={inputNumClase} />
                   </td>
                   <td className="py-1 px-1 text-right text-slate-400 font-mono text-xs">
-                    {fila.contratados - fila.operativos}
+                    {permisoDescanso(fila)}
                   </td>
-                  <td className="py-1 pl-1 text-right font-mono text-xs text-slate-500">{11 * fila.operativos}</td>
+                  {/* Usa HH_TURNO_POR_FAENA, no un literal: son 10 h en Las
+                      Tórtolas y 12 en Los Bronces. Esta celda había quedado
+                      en 11 (un valor que no corresponde a ninguna faena) y
+                      por eso las filas no sumaban el Total de más abajo. */}
+                  <td className="py-1 pl-1 text-right font-mono text-xs text-slate-500">
+                    {hhDeFila(faena, fila)}
+                  </td>
                 </tr>
               ))}
               <tr className="border-t-2 border-slate-300 font-semibold text-slate-700">

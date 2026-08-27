@@ -12,6 +12,17 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // `supabase gen types typescript` y tipar createClient<Database>(...)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+export interface FiltrosDocumentos {
+  contrato_id?: string
+  estado?: string
+  tipo?: string
+  creado_por?: string
+  /** Cuántas filas traer. Sin esto, la consulta no pagina. */
+  limite?: number
+  /** Desde qué fila, para "cargar más". */
+  desde?: number
+}
+
 // ============ AUTH HELPERS ============
 
 export const auth = {
@@ -224,19 +235,62 @@ export const db = {
     return data
   },
 
-  async obtenerDocumentos(filtros: any) {
+  async obtenerDocumentos(filtros: FiltrosDocumentos) {
     let query = supabase
       .from('documentos')
       .select('*, usuario_creador:creado_por(nombre, email, rol), usuario_aprobador:aprobado_por(nombre, email, rol)')
 
+    // contrato_id: hoy hay un solo contrato activo, así que omitirlo no se
+    // nota. En cuanto exista un segundo, sin este filtro el pasillo de
+    // revisión y el compilado del día mezclarían documentos de ambos.
+    if (filtros.contrato_id) query = query.eq('contrato_id', filtros.contrato_id)
     if (filtros.estado) query = query.eq('estado', filtros.estado)
     if (filtros.tipo) query = query.eq('tipo', filtros.tipo)
     if (filtros.creado_por) query = query.eq('creado_por', filtros.creado_por)
 
-    const { data, error } = await query.order('fecha_creacion', { ascending: false })
+    query = query.order('fecha_creacion', { ascending: false })
+
+    // Paginación opcional: sin límite, estas listas crecen para siempre.
+    if (filtros.limite) {
+      const desde = filtros.desde ?? 0
+      query = query.range(desde, desde + filtros.limite - 1)
+    }
+
+    const { data, error } = await query
 
     if (error) throw error
     return data
+  },
+
+  // PER-4: la pantalla de Inicio solo necesita CONTAR. Antes descargaba las
+  // dos tablas completas para hacer .filter().length — y un parte diario
+  // pesa entre 8 y 15 kB por fila con sus arreglos jsonb. Con head:true no
+  // viaja ninguna fila, solo el número, así que el costo deja de crecer con
+  // el tiempo. Es la primera pantalla tras el login, la ve todo el mundo en
+  // cada sesión.
+  async contarDocumentos(filtros: FiltrosDocumentos) {
+    let query = supabase.from('documentos').select('id', { count: 'exact', head: true })
+
+    if (filtros.contrato_id) query = query.eq('contrato_id', filtros.contrato_id)
+    if (filtros.estado) query = query.eq('estado', filtros.estado)
+    if (filtros.creado_por) query = query.eq('creado_por', filtros.creado_por)
+
+    const { count, error } = await query
+    if (error) throw error
+    return count ?? 0
+  },
+
+  async contarPartesDiarios(contratoId: string, estado?: string) {
+    let query = supabase
+      .from('partes_diarios')
+      .select('id', { count: 'exact', head: true })
+      .eq('contrato_id', contratoId)
+
+    if (estado) query = query.eq('estado', estado)
+
+    const { count, error } = await query
+    if (error) throw error
+    return count ?? 0
   },
 
   async actualizarDocumento(id: string, updates: any) {

@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { DocumentoPreviewModal } from './DocumentoPreviewModal'
+import { useAutoguardado, leerBorrador, haceCuanto } from '@hooks/useBorradorLocal'
 
 interface NuevaSolicitudCompraModalProps {
   onCerrar: () => void
 }
+
+/** Una sola solicitud a la vez por navegador, así que basta una clave fija. */
+const CLAVE_BORRADOR = 'solicitud-compra'
 
 interface ItemSolicitud {
   descripcion: string
@@ -33,6 +37,21 @@ export const NuevaSolicitudCompraModal = ({ onCerrar }: NuevaSolicitudCompraModa
   const [items, setItems] = useState<ItemSolicitud[]>([filaVacia()])
   const [errorValidacion, setErrorValidacion] = useState<string | null>(null)
   const [enviado, setEnviado] = useState(false)
+
+  // Autoguardado de los ítems. El documento de respaldo es un File y no se
+  // puede serializar, así que hay que volver a adjuntarlo — se avisa.
+  const { limpiar: limpiarBorrador } = useAutoguardado(CLAVE_BORRADOR, { items }, !enviado)
+  const [borrador, setBorrador] = useState(() => leerBorrador<{ items: ItemSolicitud[] }>(CLAVE_BORRADOR))
+
+  const hayAlgoEscrito = items.some((i) => i.descripcion.trim() || i.marca.trim() || i.modelo.trim() || i.cantidad)
+
+  const cerrarConAviso = () => {
+    if (!enviado && hayAlgoEscrito) {
+      const ok = window.confirm('Tienes una solicitud a medio llenar. Si cierras ahora, la retomas después desde el borrador.')
+      if (!ok) return
+    }
+    onCerrar()
+  }
 
   const elegirDocumento = (files: FileList | null) => {
     const file = files?.[0]
@@ -84,11 +103,12 @@ export const NuevaSolicitudCompraModal = ({ onCerrar }: NuevaSolicitudCompraModa
     // formulario (carga + preview + tabla + validación) funciona de
     // punta a punta.
     setEnviado(true)
+    limpiarBorrador()
   }
 
   return (
     <>
-    <Dialog.Root open onOpenChange={(o) => !o && onCerrar()}>
+    <Dialog.Root open onOpenChange={(o) => !o && cerrarConAviso()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/50 z-40" />
         <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-3xl max-h-[90vh] bg-white rounded-lg shadow-xl z-50 flex flex-col">
@@ -112,6 +132,39 @@ export const NuevaSolicitudCompraModal = ({ onCerrar }: NuevaSolicitudCompraModa
               </div>
             ) : (
               <>
+                {borrador && borrador.datos.items.some((i) => i.descripcion.trim()) && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Tienes una solicitud a medio llenar de {haceCuanto(borrador.guardadoEn)}
+                    </p>
+                    <p className="text-xs text-amber-800/80 mt-1">
+                      Se recuperan los ítems; el documento de respaldo hay que volver a adjuntarlo.
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setItems(borrador.datos.items)
+                          setBorrador(null)
+                        }}
+                        className="px-4 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700"
+                      >
+                        Recuperar ítems
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          limpiarBorrador()
+                          setBorrador(null)
+                        }}
+                        className="px-4 py-2.5 text-sm font-semibold text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-100"
+                      >
+                        Empezar de cero
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Documento de respaldo */}
                 <section>
                   <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2">

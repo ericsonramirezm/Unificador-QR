@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { auth } from '@lib/supabase'
+import { traducirError } from '@lib/errores'
 
 interface LoginFormData {
   email: string
@@ -26,7 +27,7 @@ export const Login = ({ onLoginSuccess }: LoginProps) => {
         onLoginSuccess(result.user.id)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Error al iniciar sesión'
+      const message = traducirError(err, 'Error al iniciar sesión')
       setErrorMsg(message)
     } finally {
       setIsLoading(false)

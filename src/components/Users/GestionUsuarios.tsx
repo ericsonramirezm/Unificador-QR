@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form'
 import { Usuario, UserRole } from '@/types/index'
 import { db } from '@lib/supabase'
 import { formatearCargo } from '@lib/formato'
+import { traducirError } from '@lib/errores'
 
 interface GestionUsuariosProps {
   usuario: Usuario
@@ -44,7 +45,7 @@ export const GestionUsuarios = ({ usuario }: GestionUsuariosProps) => {
       const data = await db.obtenerUsuarios()
       setUsuarios(data as Usuario[])
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'No se pudieron cargar los usuarios'
+      const msg = traducirError(err, 'No se pudieron cargar los usuarios')
       setError(msg)
     } finally {
       setCargando(false)
@@ -58,7 +59,7 @@ export const GestionUsuarios = ({ usuario }: GestionUsuariosProps) => {
       await db.actualizarRolUsuario(id, nuevoRol)
       setUsuarios((prev) => prev.map((u) => (u.id === id ? { ...u, rol: nuevoRol } : u)))
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'No se pudo actualizar el rol'
+      const msg = traducirError(err, 'No se pudo actualizar el rol')
       setError(msg)
     } finally {
       setActualizandoId(null)
@@ -80,7 +81,7 @@ export const GestionUsuarios = ({ usuario }: GestionUsuariosProps) => {
       setExitoVincular(`${nuevo.nombre} quedó vinculado como ${formatearCargo(nuevo.rol)}.`)
       reset({ id: '', nombre: '', email: '', rol: UserRole.CONSULTOR })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'No se pudo vincular el usuario'
+      const msg = traducirError(err, 'No se pudo vincular el usuario')
       setErrorVincular(msg)
     } finally {
       setVinculando(false)

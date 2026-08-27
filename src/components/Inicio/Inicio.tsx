@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react'
-import { db } from '@lib/supabase'
+import { db, type FiltrosDocumentos } from '@lib/supabase'
+import { traducirError } from '@lib/errores'
 import { DocumentStatus, ParteDiarioEstado, UserRole, Usuario } from '@/types/index'
+
+interface Conteos {
+  docsPendientes: number
+  docsTotal: number
+  partesBorrador: number
+  partesEnviados: number
+  partesComentados: number
+  partesTotal: number
+}
 
 interface InicioProps {
   usuario: Usuario
@@ -28,8 +38,14 @@ interface Tarjeta {
 // Pensada para que sumar un módulo nuevo más adelante solo agregue su
 // propia tarjeta acá, sin rediseñar la pantalla.
 export const Inicio = ({ usuario, contrato, onNavigate }: InicioProps) => {
-  const [documentos, setDocumentos] = useState<any[] | null>(null)
-  const [partes, setPartes] = useState<any[] | null>(null)
+  const [conteos, setConteos] = useState<Conteos>({
+    docsPendientes: 0,
+    docsTotal: 0,
+    partesBorrador: 0,
+    partesEnviados: 0,
+    partesComentados: 0,
+    partesTotal: 0,
+  })
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,15 +65,27 @@ export const Inicio = ({ usuario, contrato, onNavigate }: InicioProps) => {
     setIsLoading(true)
     setError(null)
     try {
-      const filtrosDocs: any = usuario.rol === UserRole.COORDINADOR ? {} : { creado_por: usuario.id }
-      const [docs, partesData] = await Promise.all([
-        veDocumentos ? db.obtenerDocumentos(filtrosDocs) : Promise.resolve(null),
-        veDailyReport ? db.obtenerPartesDiarios(contrato.id) : Promise.resolve(null),
-      ])
-      setDocumentos(docs)
-      setPartes(partesData)
+      // Solo se piden números (count exacto, sin traer filas). Son seis
+      // consultas diminutas en paralelo en vez de dos descargas completas.
+      const base: FiltrosDocumentos = {
+        contrato_id: contrato.id,
+        ...(usuario.rol === UserRole.COORDINADOR ? {} : { creado_por: usuario.id }),
+      }
+      const cero = Promise.resolve(0)
+
+      const [docsPendientes, docsTotal, partesBorrador, partesEnviados, partesComentados, partesTotal] =
+        await Promise.all([
+          veDocumentos ? db.contarDocumentos({ ...base, estado: DocumentStatus.PENDIENTE }) : cero,
+          veDocumentos ? db.contarDocumentos(base) : cero,
+          veDailyReport ? db.contarPartesDiarios(contrato.id, ParteDiarioEstado.BORRADOR) : cero,
+          veDailyReport ? db.contarPartesDiarios(contrato.id, ParteDiarioEstado.ENVIADO) : cero,
+          veDailyReport ? db.contarPartesDiarios(contrato.id, ParteDiarioEstado.COMENTADO_MANDANTE) : cero,
+          veDailyReport ? db.contarPartesDiarios(contrato.id) : cero,
+        ])
+
+      setConteos({ docsPendientes, docsTotal, partesBorrador, partesEnviados, partesComentados, partesTotal })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cargar el resumen')
+      setError(traducirError(err, 'No se pudo cargar el resumen'))
     } finally {
       setIsLoading(false)
     }
@@ -67,13 +95,7 @@ export const Inicio = ({ usuario, contrato, onNavigate }: InicioProps) => {
     return <div className="bg-white rounded-lg border border-slate-200 p-6 text-sm text-slate-500">Cargando…</div>
   }
 
-  const docsPendientes = documentos?.filter((d) => d.estado === DocumentStatus.PENDIENTE).length ?? 0
-  const docsTotal = documentos?.length ?? 0
-
-  const partesBorrador = partes?.filter((p) => p.estado === ParteDiarioEstado.BORRADOR).length ?? 0
-  const partesEnviados = partes?.filter((p) => p.estado === ParteDiarioEstado.ENVIADO).length ?? 0
-  const partesComentados = partes?.filter((p) => p.estado === ParteDiarioEstado.COMENTADO_MANDANTE).length ?? 0
-  const partesTotal = partes?.length ?? 0
+  const { docsPendientes, docsTotal, partesBorrador, partesEnviados, partesComentados, partesTotal } = conteos
 
   const tarjetas: Tarjeta[] = []
 

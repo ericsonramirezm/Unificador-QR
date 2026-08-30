@@ -9,6 +9,8 @@ interface TablaOrdenesCompraProps {
   cargando: boolean
   onDevolver: (id: string) => Promise<void>
   onGuardarCampo: (id: string, campo: 'oc_numero' | 'proveedor' | 'fecha_oc', valor: string) => Promise<void>
+  /** Elimina un ítem para siempre — no vuelve a Requisiciones (a diferencia de onDevolver). */
+  onEliminar: (id: string) => Promise<void>
 }
 
 const NUM_COLUMNAS = 17
@@ -19,10 +21,39 @@ const NUM_COLUMNAS = 17
 //
 // Se agrupa por OC, mismo criterio que RQ: el campo OC solo guarda al
 // presionar "Guardar" (no al perder el foco), para que la fila no salte de
-// grupo mientras se está escribiendo el número. Las filas sin OC todavía
-// quedan juntas en "Sin N° OC", al final.
-export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo }: TablaOrdenesCompraProps) => {
+// grupo mientras se está escribiendo el número. Por eso el botón "Guardar"
+// vive en la columna de acciones (entre Fecha OC y "← RQ"), no pegado al
+// input. Las filas sin OC todavía quedan juntas en "Sin N° OC", al final.
+export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
   const [procesando, setProcesando] = useState(false)
+
+  // Igual que RQ en TablaRequisiciones: el valor de OC se maneja acá (no
+  // en un CeldaEditable) para poder mostrar el botón "Guardar" en la
+  // columna de acciones en vez de pegado al input.
+  const [ocPendiente, setOcPendiente] = useState<Record<string, string>>({})
+  const [guardandoOC, setGuardandoOC] = useState<Record<string, boolean>>({})
+  const [errorOC, setErrorOC] = useState<Record<string, string>>({})
+
+  const valorOCActual = (item: OrdenCompra) => ocPendiente[item.id] ?? item.oc_numero ?? ''
+  const huboCambioOC = (item: OrdenCompra) => item.id in ocPendiente && ocPendiente[item.id] !== (item.oc_numero ?? '')
+
+  const guardarOC = async (item: OrdenCompra) => {
+    if (!huboCambioOC(item)) return
+    setGuardandoOC((prev) => ({ ...prev, [item.id]: true }))
+    setErrorOC((prev) => ({ ...prev, [item.id]: '' }))
+    try {
+      await onGuardarCampo(item.id, 'oc_numero', ocPendiente[item.id])
+      setOcPendiente((prev) => {
+        const copia = { ...prev }
+        delete copia[item.id]
+        return copia
+      })
+    } catch {
+      setErrorOC((prev) => ({ ...prev, [item.id]: 'No se guardó' }))
+    } finally {
+      setGuardandoOC((prev) => ({ ...prev, [item.id]: false }))
+    }
+  }
 
   const devolver = async (id: string, codigoSc: string, numeroItem: number) => {
     const ok = window.confirm(
@@ -32,6 +63,21 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
     setProcesando(true)
     try {
       await onDevolver(id)
+    } finally {
+      setProcesando(false)
+    }
+  }
+
+  // Distinto de "Devolver": esto borra el ítem para siempre, no lo hace
+  // volver a ninguna etapa anterior.
+  const eliminar = async (id: string, codigoSc: string, numeroItem: number) => {
+    const ok = window.confirm(
+      `¿Eliminar para siempre el ítem ${numeroItem} de ${codigoSc}? Esta acción no se puede deshacer: el ítem NO vuelve a Requisiciones, se borra por completo.`
+    )
+    if (!ok) return
+    setProcesando(true)
+    try {
+      await onEliminar(id)
     } finally {
       setProcesando(false)
     }
@@ -54,7 +100,7 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
   return (
     <div>
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-sm min-w-[1950px]">
+        <table className="w-full text-sm min-w-[2530px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
               <th className="text-left py-2 px-2 w-32">Solicitado por</th>
@@ -70,10 +116,10 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
               <th className="text-left py-2 px-2 w-20">Documento</th>
               <th className="text-left py-2 px-2 w-24">RQ</th>
               <th className="text-left py-2 px-2 w-24">Fecha RQ</th>
-              <th className="text-left py-2 px-2 w-36">Proveedor</th>
-              <th className="text-left py-2 px-2 w-52">OC</th>
+              <th className="text-left py-2 px-2 w-[30rem]">Proveedor</th>
+              <th className="text-left py-2 px-2 w-40">OC</th>
               <th className="text-left py-2 px-2 w-28">Fecha OC</th>
-              <th className="w-16"></th>
+              <th className="w-64"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -126,11 +172,24 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
                         />
                       </td>
                       <td className="py-2 px-2">
-                        <CeldaEditable
-                          valor={item.oc_numero ?? ''}
-                          onGuardar={(v) => onGuardarCampo(item.id, 'oc_numero', v)}
-                          confirmarConBoton
-                        />
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={valorOCActual(item)}
+                            placeholder="por llenar"
+                            onChange={(e) => setOcPendiente((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') guardarOC(item)
+                            }}
+                            disabled={!!guardandoOC[item.id]}
+                            className="w-full px-2 py-1 border border-slate-300 rounded-md text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 disabled:bg-slate-50"
+                          />
+                          {errorOC[item.id] && (
+                            <p className="absolute top-full left-0 text-[11px] text-red-600 mt-0.5 whitespace-nowrap">
+                              {errorOC[item.id]}
+                            </p>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2 px-2">
                         <CeldaEditable
@@ -139,15 +198,33 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
                           onGuardar={(v) => onGuardarCampo(item.id, 'fecha_oc', v)}
                         />
                       </td>
-                      <td className="py-2 px-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => devolver(item.id, item.codigo_sc, item.numero_item)}
-                          disabled={procesando}
-                          className="text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60"
-                        >
-                          ← RQ
-                        </button>
+                      <td className="py-2 px-2">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => guardarOC(item)}
+                            disabled={!huboCambioOC(item) || !!guardandoOC[item.id]}
+                            className="shrink-0 px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {guardandoOC[item.id] ? '…' : 'Guardar'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => devolver(item.id, item.codigo_sc, item.numero_item)}
+                            disabled={procesando}
+                            className="text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60"
+                          >
+                            ← RQ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => eliminar(item.id, item.codigo_sc, item.numero_item)}
+                            disabled={procesando}
+                            className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -158,7 +235,7 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
         </table>
       </div>
       <p className="text-xs text-slate-500 mt-2">
-        Proveedor y Fecha OC se guardan solos al salir del campo. OC necesita presionar "Guardar" (o Enter).
+        Proveedor y Fecha OC se guardan solos al salir del campo. El número de OC necesita presionar "Guardar" (o Enter).
       </p>
     </div>
   )

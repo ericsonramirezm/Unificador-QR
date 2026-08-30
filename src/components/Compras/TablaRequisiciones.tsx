@@ -10,24 +10,57 @@ interface TablaRequisicionesProps {
   onAvanzar: (ids: string[]) => Promise<void>
   onDevolver: (id: string) => Promise<void>
   onGuardarCampo: (id: string, campo: 'rq_numero' | 'fecha_rq' | 'codigo_defontana', valor: string) => Promise<void>
+  /** Elimina un ítem para siempre — no vuelve a Solicitudes de Compra (a diferencia de onDevolver). */
+  onEliminar: (id: string) => Promise<void>
 }
 
-const NUM_COLUMNAS = 18
+const NUM_COLUMNAS = 15
 
-// Mismas columnas que TablaSolicitudesCompra y TablaOrdenesCompra, mismo
-// orden. Acá Código Defontana/RQ/Fecha RQ ya se pueden completar (son
-// propios de esta etapa); Proveedor/OC/Fecha OC siguen en blanco porque el
-// ítem todavía no llegó a Órdenes de Compra.
+// Acá Código Defontana/RQ/Fecha RQ ya se pueden completar (son propios de
+// esta etapa). Proveedor/OC/Fecha OC ya no se muestran en esta pestaña —
+// esos campos son propios de Órdenes de Compra y el ítem todavía no llegó
+// ahí.
 //
 // Las filas se agrupan por RQ (así varios ítems con el mismo N° de
 // Requisición quedan juntos, con banda de fondo alternada). El campo RQ
 // solo guarda al presionar "Guardar" (no al perder el foco): si guardara
 // en cada tecleo, la fila saltaría de grupo mientras la persona todavía
-// está escribiendo el número. Las filas sin RQ todavía quedan en su propio
-// grupo, "Sin N° RQ", al final.
-export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onGuardarCampo }: TablaRequisicionesProps) => {
+// está escribiendo el número. Por eso el botón "Guardar" vive en la
+// columna de acciones (entre Fecha RQ y los botones de avance/devolución),
+// no pegado al input. Las filas sin RQ todavía quedan en su propio grupo,
+// "Sin N° RQ", al final.
+export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaRequisicionesProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [procesando, setProcesando] = useState(false)
+
+  // Valor del campo RQ mientras se edita, guardado acá (no en un
+  // CeldaEditable) porque el botón "Guardar" ahora vive en la columna de
+  // acciones, separado del input — así se puede mostrar entre la Fecha RQ
+  // y los botones de avance/devolución, en vez de pegado al campo.
+  const [rqPendiente, setRqPendiente] = useState<Record<string, string>>({})
+  const [guardandoRQ, setGuardandoRQ] = useState<Record<string, boolean>>({})
+  const [errorRQ, setErrorRQ] = useState<Record<string, string>>({})
+
+  const valorRQActual = (item: Requisicion) => rqPendiente[item.id] ?? item.rq_numero ?? ''
+  const huboCambioRQ = (item: Requisicion) => item.id in rqPendiente && rqPendiente[item.id] !== (item.rq_numero ?? '')
+
+  const guardarRQ = async (item: Requisicion) => {
+    if (!huboCambioRQ(item)) return
+    setGuardandoRQ((prev) => ({ ...prev, [item.id]: true }))
+    setErrorRQ((prev) => ({ ...prev, [item.id]: '' }))
+    try {
+      await onGuardarCampo(item.id, 'rq_numero', rqPendiente[item.id])
+      setRqPendiente((prev) => {
+        const copia = { ...prev }
+        delete copia[item.id]
+        return copia
+      })
+    } catch {
+      setErrorRQ((prev) => ({ ...prev, [item.id]: 'No se guardó' }))
+    } finally {
+      setGuardandoRQ((prev) => ({ ...prev, [item.id]: false }))
+    }
+  }
 
   const alternarFila = (id: string) => {
     setSeleccion((prev) => {
@@ -75,6 +108,21 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
     }
   }
 
+  // Distinto de "Devolver": esto borra el ítem para siempre, no lo hace
+  // volver a ninguna etapa anterior.
+  const eliminar = async (id: string, codigoSc: string, numeroItem: number) => {
+    const ok = window.confirm(
+      `¿Eliminar para siempre el ítem ${numeroItem} de ${codigoSc}? Esta acción no se puede deshacer: el ítem NO vuelve a Solicitudes de Compra, se borra por completo.`
+    )
+    if (!ok) return
+    setProcesando(true)
+    try {
+      await onEliminar(id)
+    } finally {
+      setProcesando(false)
+    }
+  }
+
   if (cargando) {
     return <p className="text-sm text-slate-500 py-8 text-center">Cargando…</p>
   }
@@ -108,7 +156,7 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
       )}
 
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-sm min-w-[1950px]">
+        <table className="w-full text-sm min-w-[1750px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
               <th className="py-2 px-2 w-8">
@@ -130,12 +178,9 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
               <th className="text-left py-2 px-2 w-24">Solicitud de Compra</th>
               <th className="text-left py-2 px-2 w-24">Fecha de Solicitud</th>
               <th className="text-left py-2 px-2 w-20">Documento</th>
-              <th className="text-left py-2 px-2 w-52">RQ</th>
+              <th className="text-left py-2 px-2 w-40">RQ</th>
               <th className="text-left py-2 px-2 w-28">Fecha RQ</th>
-              <th className="text-left py-2 px-2 w-36">Proveedor</th>
-              <th className="text-left py-2 px-2 w-24">OC</th>
-              <th className="text-left py-2 px-2 w-24">Fecha OC</th>
-              <th className="w-32"></th>
+              <th className="w-64"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -193,11 +238,24 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
                         )}
                       </td>
                       <td className="py-2 px-2">
-                        <CeldaEditable
-                          valor={item.rq_numero ?? ''}
-                          onGuardar={(v) => onGuardarCampo(item.id, 'rq_numero', v)}
-                          confirmarConBoton
-                        />
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={valorRQActual(item)}
+                            placeholder="por llenar"
+                            onChange={(e) => setRqPendiente((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') guardarRQ(item)
+                            }}
+                            disabled={!!guardandoRQ[item.id]}
+                            className="w-full px-2 py-1 border border-slate-300 rounded-md text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 disabled:bg-slate-50"
+                          />
+                          {errorRQ[item.id] && (
+                            <p className="absolute top-full left-0 text-[11px] text-red-600 mt-0.5 whitespace-nowrap">
+                              {errorRQ[item.id]}
+                            </p>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2 px-2">
                         <CeldaEditable
@@ -206,11 +264,16 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
                           onGuardar={(v) => onGuardarCampo(item.id, 'fecha_rq', v)}
                         />
                       </td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
                       <td className="py-2 px-2">
-                        <div className="flex items-center justify-end gap-3">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => guardarRQ(item)}
+                            disabled={!huboCambioRQ(item) || !!guardandoRQ[item.id]}
+                            className="shrink-0 px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {guardandoRQ[item.id] ? '…' : 'Guardar'}
+                          </button>
                           <button
                             type="button"
                             onClick={() => devolver(item.id, item.codigo_sc, item.numero_item)}
@@ -227,6 +290,14 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
                           >
                             OC →
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => eliminar(item.id, item.codigo_sc, item.numero_item)}
+                            disabled={procesando}
+                            className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
+                          >
+                            Eliminar
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -238,7 +309,7 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
         </table>
       </div>
       <p className="text-xs text-slate-500 mt-2">
-        Código Defontana y Fecha RQ se guardan solas al salir del campo. RQ necesita presionar "Guardar" (o Enter) — así la fila no cambia de grupo mientras se está escribiendo el número.
+        Código Defontana y Fecha RQ se guardan solas al salir del campo. El número de RQ necesita presionar "Guardar" (o Enter) — así la fila no cambia de grupo mientras se está escribiendo el número.
       </p>
     </div>
   )

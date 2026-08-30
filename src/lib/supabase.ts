@@ -654,4 +654,25 @@ export const db = {
     if (error) throw error
     return data as OrdenCompra
   },
+
+  // Botón "Eliminar": borra el ítem para siempre, no vuelve a ninguna
+  // etapa anterior (a diferencia de devolverRQaSC/devolverOCaRQ). Como
+  // cada pestaña solo muestra ítems que todavía no avanzaron de etapa
+  // (avanzo_a_rq/avanzo_a_oc = false), un ítem visible en la UI nunca
+  // tiene una fila hija (RQ/OC) que dependa de él, así que el delete
+  // directo es seguro sin necesidad de cascada.
+  async eliminarSolicitudCompra(id: string) {
+    const { error } = await supabase.from('solicitudes_compra').delete().eq('id', id)
+    if (error) throw error
+  },
+
+  async eliminarRequisicion(id: string) {
+    const { error } = await supabase.from('requisiciones').delete().eq('id', id)
+    if (error) throw error
+  },
+
+  async eliminarOrdenCompra(id: string) {
+    const { error } = await supabase.from('ordenes_compra').delete().eq('id', id)
+    if (error) throw error
+  },
 }

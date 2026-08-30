@@ -8,9 +8,11 @@ interface TablaSolicitudesCompraProps {
   cargando: boolean
   /** Avanza uno o varios ítems a Requisiciones (checkbox o botón por fila). */
   onAvanzar: (ids: string[]) => Promise<void>
+  /** Elimina un ítem para siempre (no pasa por ninguna etapa). */
+  onEliminar: (id: string) => Promise<void>
 }
 
-const NUM_COLUMNAS = 18
+const NUM_COLUMNAS = 16
 
 // Columnas unificadas: las tres pestañas (SC/RQ/OC) muestran el mismo set,
 // en el mismo orden, así se ve de un vistazo en qué parte del ciclo
@@ -22,9 +24,10 @@ const NUM_COLUMNAS = 18
 // solicitud), con una banda de fondo alternada por grupo y una línea más
 // marcada entre uno y otro — así quedan visualmente juntos aunque haya
 // muchas solicitudes en la lista.
-export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSolicitudesCompraProps) => {
+export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar, onEliminar }: TablaSolicitudesCompraProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [avanzando, setAvanzando] = useState(false)
+  const [eliminando, setEliminando] = useState(false)
 
   const alternarFila = (id: string) => {
     setSeleccion((prev) => {
@@ -64,6 +67,22 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSoli
     }
   }
 
+  // Elimina un solo ítem, no toda la Solicitud de Compra: una misma SC
+  // puede agrupar varios ítems (mismo codigo_sc), y acá se borra solo la
+  // fila elegida — los demás ítems de esa SC no se ven afectados.
+  const eliminar = async (id: string, codigoSc: string, numeroItem: number) => {
+    const ok = window.confirm(
+      `¿Eliminar para siempre el ítem ${numeroItem} de ${codigoSc}? Esta acción no se puede deshacer. Solo se elimina este ítem; el resto de los ítems de la misma Solicitud de Compra no se ven afectados.`
+    )
+    if (!ok) return
+    setEliminando(true)
+    try {
+      await onEliminar(id)
+    } finally {
+      setEliminando(false)
+    }
+  }
+
   if (cargando) {
     return <p className="text-sm text-slate-500 py-8 text-center">Cargando…</p>
   }
@@ -97,7 +116,7 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSoli
       )}
 
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-sm min-w-[1900px]">
+        <table className="w-full text-sm min-w-[1700px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
               <th className="py-2 px-2 w-8">
@@ -119,12 +138,10 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSoli
               <th className="text-left py-2 px-2 w-24">Solicitud de Compra</th>
               <th className="text-left py-2 px-2 w-24">Fecha de Solicitud</th>
               <th className="text-left py-2 px-2 w-20">Documento</th>
-              <th className="text-left py-2 px-2 w-24">RQ</th>
-              <th className="text-left py-2 px-2 w-24">Fecha RQ</th>
               <th className="text-left py-2 px-2 w-36">Proveedor</th>
               <th className="text-left py-2 px-2 w-24">OC</th>
               <th className="text-left py-2 px-2 w-24">Fecha OC</th>
-              <th className="w-24"></th>
+              <th className="w-40"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -179,17 +196,25 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSoli
                       <td className="py-2 px-2 text-slate-300">—</td>
                       <td className="py-2 px-2 text-slate-300">—</td>
                       <td className="py-2 px-2 text-slate-300">—</td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
-                      <td className="py-2 px-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => avanzarUna(item.id)}
-                          disabled={avanzando}
-                          className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60"
-                        >
-                          RQ →
-                        </button>
+                      <td className="py-2 px-2">
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={() => avanzarUna(item.id)}
+                            disabled={avanzando}
+                            className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60"
+                          >
+                            RQ →
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => eliminar(item.id, item.codigo_sc, item.numero_item)}
+                            disabled={eliminando}
+                            className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

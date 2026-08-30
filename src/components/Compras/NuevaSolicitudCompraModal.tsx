@@ -45,6 +45,9 @@ export const NuevaSolicitudCompraModal = ({ usuario, contrato, onCerrar, onGuard
   const [mostrarPreview, setMostrarPreview] = useState(false)
 
   const [solicitadoPor, setSolicitadoPor] = useState(usuario.nombre)
+  // Fecha de la solicitud: por defecto hoy, pero editable — por ejemplo
+  // para ingresar más tarde una solicitud que en papel quedó con otra fecha.
+  const [fechaSolicitud, setFechaSolicitud] = useState(() => new Date().toISOString().slice(0, 10))
   const [items, setItems] = useState<ItemSolicitud[]>([filaVacia()])
   const [errorValidacion, setErrorValidacion] = useState<string | null>(null)
   const [enviado, setEnviado] = useState(false)
@@ -59,8 +62,10 @@ export const NuevaSolicitudCompraModal = ({ usuario, contrato, onCerrar, onGuard
 
   // Autoguardado de los ítems. El documento de respaldo es un File y no se
   // puede serializar, así que hay que volver a adjuntarlo — se avisa.
-  const { limpiar: limpiarBorrador } = useAutoguardado(CLAVE_BORRADOR, { items, solicitadoPor }, !enviado)
-  const [borrador, setBorrador] = useState(() => leerBorrador<{ items: ItemSolicitud[]; solicitadoPor: string }>(CLAVE_BORRADOR))
+  const { limpiar: limpiarBorrador } = useAutoguardado(CLAVE_BORRADOR, { items, solicitadoPor, fechaSolicitud }, !enviado)
+  const [borrador, setBorrador] = useState(() =>
+    leerBorrador<{ items: ItemSolicitud[]; solicitadoPor: string; fechaSolicitud?: string }>(CLAVE_BORRADOR)
+  )
 
   const hayAlgoEscrito = items.some((i) => i.descripcion.trim() || i.marca.trim() || i.modelo.trim() || i.cantidad)
 
@@ -124,6 +129,10 @@ export const NuevaSolicitudCompraModal = ({ usuario, contrato, onCerrar, onGuard
       setErrorValidacion('Indica quién solicita los materiales.')
       return
     }
+    if (!fechaSolicitud) {
+      setErrorValidacion('Indica la fecha de la solicitud.')
+      return
+    }
     if (!contrato) {
       setErrorValidacion('No hay un contrato activo — recarga la página e inténtalo de nuevo.')
       return
@@ -154,13 +163,12 @@ export const NuevaSolicitudCompraModal = ({ usuario, contrato, onCerrar, onGuard
 
       // Paso 3: una fila por ítem, todas en un solo insert (o quedan
       // todas, o ninguna).
-      const fechaHoy = new Date().toISOString().slice(0, 10)
       const filas = itemsCompletos.map((item, index) => ({
         contrato_id: contrato.id,
         codigo_sc: codigo!,
         numero_item: index + 1,
         solicitado_por: solicitadoPor.trim(),
-        fecha_solicitud: fechaHoy,
+        fecha_solicitud: fechaSolicitud,
         documento_url: doc?.url ?? null,
         documento_nombre: doc?.nombre ?? null,
         descripcion: item.descripcion.trim(),
@@ -224,6 +232,7 @@ export const NuevaSolicitudCompraModal = ({ usuario, contrato, onCerrar, onGuard
                         onClick={() => {
                           setItems(borrador.datos.items)
                           setSolicitadoPor(borrador.datos.solicitadoPor || usuario.nombre)
+                          if (borrador.datos.fechaSolicitud) setFechaSolicitud(borrador.datos.fechaSolicitud)
                           setBorrador(null)
                         }}
                         className="px-4 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700"
@@ -244,22 +253,37 @@ export const NuevaSolicitudCompraModal = ({ usuario, contrato, onCerrar, onGuard
                   </div>
                 )}
 
-                {/* Solicitado por */}
-                <section>
-                  <label htmlFor="solicitado-por" className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2 block">
-                    Solicitado por
-                  </label>
-                  <input
-                    id="solicitado-por"
-                    type="text"
-                    value={solicitadoPor}
-                    onChange={(e) => setSolicitadoPor(e.target.value)}
-                    placeholder="Nombre de quien pide los materiales"
-                    className="w-full max-w-sm px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">
-                    Aplica a todos los ítems de esta solicitud. Puede ser distinto de quien la está ingresando.
-                  </p>
+                {/* Solicitado por + Fecha */}
+                <section className="flex flex-wrap gap-6">
+                  <div>
+                    <label htmlFor="solicitado-por" className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2 block">
+                      Solicitado por
+                    </label>
+                    <input
+                      id="solicitado-por"
+                      type="text"
+                      value={solicitadoPor}
+                      onChange={(e) => setSolicitadoPor(e.target.value)}
+                      placeholder="Nombre de quien pide los materiales"
+                      className="w-full max-w-sm px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Aplica a todos los ítems de esta solicitud. Puede ser distinto de quien la está ingresando.
+                    </p>
+                  </div>
+                  <div>
+                    <label htmlFor="fecha-solicitud" className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-2 block">
+                      Fecha
+                    </label>
+                    <input
+                      id="fecha-solicitud"
+                      type="date"
+                      value={fechaSolicitud}
+                      onChange={(e) => setFechaSolicitud(e.target.value)}
+                      className="w-full max-w-[10rem] px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">Viene con la fecha de hoy; se puede cambiar.</p>
+                  </div>
                 </section>
 
                 {/* Documento de respaldo */}

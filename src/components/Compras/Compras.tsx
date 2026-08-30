@@ -109,6 +109,36 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
     setOrdenes((prev) => prev.map((o) => (o.id === id ? { ...o, ...actualizada } : o)))
   }
 
+  // "Eliminar": borra para siempre, no vuelve a la etapa anterior (a
+  // diferencia de "Devolver"). El confirm() con la advertencia vive en
+  // cada tabla, acá solo se llama a la base y se refresca la lista.
+  const eliminarSC = async (id: string) => {
+    try {
+      await db.eliminarSolicitudCompra(id)
+      await cargarTodo()
+    } catch (err) {
+      setError(traducirError(err, 'No se pudo eliminar la Solicitud de Compra'))
+    }
+  }
+
+  const eliminarRQ = async (id: string) => {
+    try {
+      await db.eliminarRequisicion(id)
+      await cargarTodo()
+    } catch (err) {
+      setError(traducirError(err, 'No se pudo eliminar la Requisición'))
+    }
+  }
+
+  const eliminarOC = async (id: string) => {
+    try {
+      await db.eliminarOrdenCompra(id)
+      await cargarTodo()
+    } catch (err) {
+      setError(traducirError(err, 'No se pudo eliminar la Orden de Compra'))
+    }
+  }
+
   const TABS: { id: Pestana; etiqueta: string; total: number }[] = [
     { id: 'sc', etiqueta: 'Solicitudes de Compra', total: solicitudes.length },
     { id: 'rq', etiqueta: 'Requisiciones', total: requisiciones.length },
@@ -160,7 +190,7 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
       </div>
 
       {pestana === 'sc' && (
-        <TablaSolicitudesCompra items={solicitudes} cargando={cargando} onAvanzar={avanzarSCaRQ} />
+        <TablaSolicitudesCompra items={solicitudes} cargando={cargando} onAvanzar={avanzarSCaRQ} onEliminar={eliminarSC} />
       )}
       {pestana === 'rq' && (
         <TablaRequisiciones
@@ -169,10 +199,17 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
           onAvanzar={avanzarRQaOC}
           onDevolver={devolverRQaSC}
           onGuardarCampo={guardarCampoRQ}
+          onEliminar={eliminarRQ}
         />
       )}
       {pestana === 'oc' && (
-        <TablaOrdenesCompra items={ordenes} cargando={cargando} onDevolver={devolverOCaRQ} onGuardarCampo={guardarCampoOC} />
+        <TablaOrdenesCompra
+          items={ordenes}
+          cargando={cargando}
+          onDevolver={devolverOCaRQ}
+          onGuardarCampo={guardarCampoOC}
+          onEliminar={eliminarOC}
+        />
       )}
 
       {mostrarNuevaSolicitud && (

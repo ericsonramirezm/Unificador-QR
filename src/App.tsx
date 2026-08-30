@@ -126,7 +126,9 @@ export function App() {
         )}
 
         {activeView === 'compras' &&
-          (usuario.rol === UserRole.COORDINADOR || usuario.rol === UserRole.CONSULTOR) && <Compras />}
+          (usuario.rol === UserRole.COORDINADOR || usuario.rol === UserRole.CONSULTOR) && (
+            <Compras usuario={usuario} contrato={contratoActivo} />
+          )}
       </Suspense>
 
       {activeView === 'config' && (

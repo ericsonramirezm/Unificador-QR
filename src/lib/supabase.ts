@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { UserRole } from '@/types/index'
+import { UserRole, SolicitudCompra, Requisicion, OrdenCompra } from '@/types/index'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -520,5 +520,120 @@ export const db = {
 
     if (error) throw error
     return data
+  },
+
+  // ============ COMPRAS (SC -> RQ -> OC) ============
+  // Ver add_compras.sql. Código SC atómico por contrato (mismo patrón que
+  // obtenerSiguienteSecuenciaPDF: evita colisiones si dos coordinadores
+  // crean una SC al mismo tiempo).
+  async obtenerSiguienteCodigoSC(contratoId: string): Promise<string> {
+    const { data, error } = await supabase.rpc('obtener_siguiente_codigo_sc', {
+      p_contrato_id: contratoId,
+    })
+    if (error) throw error
+    return data as string
+  },
+
+  // Inserta todos los ítems de una Solicitud de Compra en un solo insert:
+  // o quedan guardadas todas las filas, o ninguna (una sola transacción).
+  async crearSolicitudCompra(
+    items: Omit<SolicitudCompra, 'id' | 'avanzo_a_rq' | 'created_at' | 'updated_at'>[]
+  ) {
+    const { data, error } = await supabase.from('solicitudes_compra').insert(items).select()
+    if (error) throw error
+    return data as SolicitudCompra[]
+  },
+
+  // Cada pestaña solo trae lo que todavía no avanzó a la siguiente etapa
+  // (avanzo_a_rq / avanzo_a_oc = false) — las filas que ya avanzaron
+  // quedan en la base para trazabilidad pero no se listan de nuevo acá.
+  async obtenerSolicitudesCompra(contratoId: string) {
+    const { data, error } = await supabase
+      .from('solicitudes_compra')
+      .select('*')
+      .eq('contrato_id', contratoId)
+      .eq('avanzo_a_rq', false)
+      .order('created_at', { ascending: false })
+      .order('numero_item', { ascending: true })
+
+    if (error) throw error
+    return data as SolicitudCompra[]
+  },
+
+  async obtenerRequisiciones(contratoId: string) {
+    const { data, error } = await supabase
+      .from('requisiciones')
+      .select('*')
+      .eq('contrato_id', contratoId)
+      .eq('avanzo_a_oc', false)
+      .order('created_at', { ascending: false })
+      .order('numero_item', { ascending: true })
+
+    if (error) throw error
+    return data as Requisicion[]
+  },
+
+  async obtenerOrdenesCompra(contratoId: string) {
+    const { data, error } = await supabase
+      .from('ordenes_compra')
+      .select('*')
+      .eq('contrato_id', contratoId)
+      .order('created_at', { ascending: false })
+      .order('numero_item', { ascending: true })
+
+    if (error) throw error
+    return data as OrdenCompra[]
+  },
+
+  // Botón "Pasar a RQ →" / "Pasar a OC →": recibe un arreglo de ids para
+  // soportar tanto una fila sola como selección en lote.
+  async avanzarSCaRQ(itemIds: string[]) {
+    const { error } = await supabase.rpc('avanzar_sc_a_rq', { p_item_ids: itemIds })
+    if (error) throw error
+  },
+
+  async avanzarRQaOC(itemIds: string[]) {
+    const { error } = await supabase.rpc('avanzar_rq_a_oc', { p_item_ids: itemIds })
+    if (error) throw error
+  },
+
+  // Botón "← Devolver": solo de a una fila (así se aprobó en el mockup).
+  async devolverRQaSC(requisicionId: string) {
+    const { error } = await supabase.rpc('devolver_rq_a_sc', { p_requisicion_id: requisicionId })
+    if (error) throw error
+  },
+
+  async devolverOCaRQ(ordenId: string) {
+    const { error } = await supabase.rpc('devolver_oc_a_rq', { p_orden_id: ordenId })
+    if (error) throw error
+  },
+
+  // Campos propios de RQ/OC: llegan en blanco al avanzar y se completan
+  // a mano en su pestaña.
+  async actualizarRequisicion(
+    id: string,
+    updates: Partial<Pick<Requisicion, 'rq_numero' | 'fecha_rq' | 'codigo_defontana'>>
+  ) {
+    const { data, error } = await supabase
+      .from('requisiciones')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data as Requisicion
+  },
+
+  async actualizarOrdenCompra(id: string, updates: Partial<Pick<OrdenCompra, 'oc_numero'>>) {
+    const { data, error } = await supabase
+      .from('ordenes_compra')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data as OrdenCompra
   },
 }

@@ -317,3 +317,81 @@ export const EQUIPOS_MAQUINARIA = [
   'Camión Rampla', 'Grúa 90 ton.', 'Alza Hombre 15 mt', 'Grupo Electrógeno 20kva',
   'Generador 10kva',
 ] as const;
+
+// ============ COMPRAS (SC -> RQ -> OC) ============
+// Ver add_compras.sql: una fila por ítem, no por envío del formulario.
+// Todos los ítems de una misma "Nueva Solicitud de Compra" comparten
+// codigo_sc y se numeran 1..N en numero_item.
+
+export interface SolicitudCompra {
+  id: string;
+  contrato_id: string;
+
+  codigo_sc: string;
+  numero_item: number;
+
+  solicitado_por: string;
+  fecha_solicitud: string;
+
+  documento_url?: string | null;
+  documento_nombre?: string | null;
+
+  descripcion: string;
+  marca?: string | null;
+  modelo?: string | null;
+  cantidad: number;
+  unidad?: string | null;
+
+  avanzo_a_rq: boolean;
+
+  creado_por: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Requisicion {
+  id: string;
+  solicitud_compra_id: string;
+  contrato_id: string;
+
+  codigo_sc: string;
+  solicitado_por: string;
+  numero_item: number;
+  descripcion: string;
+  marca?: string | null;
+  modelo?: string | null;
+  cantidad: number;
+  unidad?: string | null;
+
+  rq_numero?: string | null;
+  fecha_rq?: string | null;
+  codigo_defontana?: string | null;
+
+  avanzo_a_oc: boolean;
+
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrdenCompra {
+  id: string;
+  requisicion_id: string;
+  contrato_id: string;
+
+  rq_numero?: string | null;
+  fecha_rq?: string | null;
+  codigo_defontana?: string | null;
+  codigo_sc: string;
+  solicitado_por: string;
+  numero_item: number;
+  descripcion: string;
+  marca?: string | null;
+  modelo?: string | null;
+  cantidad: number;
+  unidad?: string | null;
+
+  oc_numero?: string | null;
+
+  created_at: string;
+  updated_at: string;
+}

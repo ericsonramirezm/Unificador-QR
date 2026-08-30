@@ -40,3 +40,10 @@ export function formatearCargo(rol?: string | null): string {
   if (!rol) return ''
   return ETIQUETAS_CARGO[rol] || rol
 }
+
+/** "2026-08-30" -> "30-08-2026". Para columnas de fecha en tablas (Compras). */
+export function formatearFechaCorta(fecha?: string | null): string {
+  if (!fecha) return ''
+  const [anio, mes, dia] = fecha.slice(0, 10).split('-')
+  return `${dia}-${mes}-${anio}`
+}

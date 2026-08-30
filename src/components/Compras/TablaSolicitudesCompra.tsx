@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { SolicitudCompra } from '@/types/index'
 import { formatearFechaCorta } from '@lib/formato'
+import { agruparPorNumero } from '@lib/agrupar'
 
 interface TablaSolicitudesCompraProps {
   items: SolicitudCompra[]
@@ -9,6 +10,18 @@ interface TablaSolicitudesCompraProps {
   onAvanzar: (ids: string[]) => Promise<void>
 }
 
+const NUM_COLUMNAS = 18
+
+// Columnas unificadas: las tres pestañas (SC/RQ/OC) muestran el mismo set,
+// en el mismo orden, así se ve de un vistazo en qué parte del ciclo
+// SC -> RQ -> OC va cada ítem. Acá, como el ítem todavía no avanzó, los
+// campos propios de RQ (Código Defontana, RQ, Fecha RQ) y de OC (Proveedor,
+// OC, Fecha OC) todavía no existen — se muestran en blanco ("—").
+//
+// Las filas se agrupan por Código SC (todos los ítems de una misma
+// solicitud), con una banda de fondo alternada por grupo y una línea más
+// marcada entre uno y otro — así quedan visualmente juntos aunque haya
+// muchas solicitudes en la lista.
 export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSolicitudesCompraProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [avanzando, setAvanzando] = useState(false)
@@ -63,6 +76,8 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSoli
     )
   }
 
+  const grupos = agruparPorNumero(items, (item) => item.codigo_sc, 'Sin Código SC')
+
   return (
     <div>
       {seleccion.size > 0 && (
@@ -82,7 +97,7 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSoli
       )}
 
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-sm min-w-[900px]">
+        <table className="w-full text-sm min-w-[1900px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
               <th className="py-2 px-2 w-8">
@@ -93,65 +108,94 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar }: TablaSoli
                   onChange={alternarTodas}
                 />
               </th>
-              <th className="text-left py-2 px-2 w-10">N°</th>
-              <th className="text-left py-2 px-2 w-24">Código SC</th>
               <th className="text-left py-2 px-2 w-32">Solicitado por</th>
-              <th className="text-left py-2 px-2 w-24">Fecha</th>
-              <th className="text-left py-2 px-2 w-24">Documento</th>
+              <th className="text-left py-2 px-2 w-10">N°</th>
+              <th className="text-left py-2 px-2 w-28">Código Defontana</th>
               <th className="text-left py-2 px-2">Descripción</th>
               <th className="text-left py-2 px-2 w-24">Marca</th>
               <th className="text-left py-2 px-2 w-24">Modelo</th>
               <th className="text-right py-2 px-2 w-20">Cantidad</th>
               <th className="text-left py-2 px-2 w-20">Unidad</th>
+              <th className="text-left py-2 px-2 w-24">Solicitud de Compra</th>
+              <th className="text-left py-2 px-2 w-24">Fecha de Solicitud</th>
+              <th className="text-left py-2 px-2 w-20">Documento</th>
+              <th className="text-left py-2 px-2 w-24">RQ</th>
+              <th className="text-left py-2 px-2 w-24">Fecha RQ</th>
+              <th className="text-left py-2 px-2 w-36">Proveedor</th>
+              <th className="text-left py-2 px-2 w-24">OC</th>
+              <th className="text-left py-2 px-2 w-24">Fecha OC</th>
               <th className="w-24"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {items.map((item) => (
-              <tr key={item.id} className={seleccion.has(item.id) ? 'bg-blue-50/50' : undefined}>
-                <td className="py-2 px-2">
-                  <input
-                    type="checkbox"
-                    aria-label={`Seleccionar ${item.codigo_sc} ítem ${item.numero_item}`}
-                    checked={seleccion.has(item.id)}
-                    onChange={() => alternarFila(item.id)}
-                  />
-                </td>
-                <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
-                <td className="py-2 px-2 font-semibold text-slate-900">{item.codigo_sc}</td>
-                <td className="py-2 px-2">{item.solicitado_por}</td>
-                <td className="py-2 px-2 text-slate-500">{formatearFechaCorta(item.fecha_solicitud)}</td>
-                <td className="py-2 px-2">
-                  {item.documento_url ? (
-                    <a
-                      href={item.documento_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 hover:underline text-xs"
+            {grupos.map((grupo, indiceGrupo) => {
+              const banda = indiceGrupo % 2 === 1
+              return (
+                <Fragment key={grupo.clave}>
+                  <tr className={banda ? 'bg-slate-100/70' : 'bg-slate-50/70'}>
+                    <td
+                      colSpan={NUM_COLUMNAS}
+                      className={`px-2 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wide ${
+                        indiceGrupo > 0 ? 'border-t-2 border-slate-300' : ''
+                      }`}
                     >
-                      Ver
-                    </a>
-                  ) : (
-                    <span className="text-slate-300 text-xs">—</span>
-                  )}
-                </td>
-                <td className="py-2 px-2">{item.descripcion}</td>
-                <td className="py-2 px-2">{item.marca || '—'}</td>
-                <td className="py-2 px-2">{item.modelo || '—'}</td>
-                <td className="py-2 px-2 text-right">{item.cantidad}</td>
-                <td className="py-2 px-2">{item.unidad || '—'}</td>
-                <td className="py-2 px-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => avanzarUna(item.id)}
-                    disabled={avanzando}
-                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60"
-                  >
-                    RQ →
-                  </button>
-                </td>
-              </tr>
-            ))}
+                      {grupo.etiqueta} · {grupo.filas.length} ítem{grupo.filas.length === 1 ? '' : 's'}
+                    </td>
+                  </tr>
+                  {grupo.filas.map((item) => (
+                    <tr key={item.id} className={seleccion.has(item.id) ? 'bg-blue-50/50' : banda ? 'bg-slate-50/40' : undefined}>
+                      <td className="py-2 px-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`Seleccionar ${item.codigo_sc} ítem ${item.numero_item}`}
+                          checked={seleccion.has(item.id)}
+                          onChange={() => alternarFila(item.id)}
+                        />
+                      </td>
+                      <td className="py-2 px-2">{item.solicitado_por}</td>
+                      <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
+                      <td className="py-2 px-2 text-slate-300">—</td>
+                      <td className="py-2 px-2">{item.descripcion}</td>
+                      <td className="py-2 px-2">{item.marca || '—'}</td>
+                      <td className="py-2 px-2">{item.modelo || '—'}</td>
+                      <td className="py-2 px-2 text-right">{item.cantidad}</td>
+                      <td className="py-2 px-2">{item.unidad || '—'}</td>
+                      <td className="py-2 px-2 font-semibold text-slate-900">{item.codigo_sc}</td>
+                      <td className="py-2 px-2 text-slate-500">{formatearFechaCorta(item.fecha_solicitud)}</td>
+                      <td className="py-2 px-2">
+                        {item.documento_url ? (
+                          <a
+                            href={item.documento_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline text-xs"
+                          >
+                            Ver
+                          </a>
+                        ) : (
+                          <span className="text-slate-300 text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-slate-300">—</td>
+                      <td className="py-2 px-2 text-slate-300">—</td>
+                      <td className="py-2 px-2 text-slate-300">—</td>
+                      <td className="py-2 px-2 text-slate-300">—</td>
+                      <td className="py-2 px-2 text-slate-300">—</td>
+                      <td className="py-2 px-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => avanzarUna(item.id)}
+                          disabled={avanzando}
+                          className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60"
+                        >
+                          RQ →
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>

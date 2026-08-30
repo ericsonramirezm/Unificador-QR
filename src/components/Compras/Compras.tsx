@@ -97,13 +97,16 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
   }
 
   const guardarCampoRQ = async (id: string, campo: 'rq_numero' | 'fecha_rq' | 'codigo_defontana', valor: string) => {
+    // actualizarRequisicion no trae el join a solicitudes_compra (Documento/
+    // Fecha de Solicitud): se combina con la fila que ya estaba en memoria
+    // para no perder esas columnas de la vista.
     const actualizada = await db.actualizarRequisicion(id, { [campo]: valor || null })
-    setRequisiciones((prev) => prev.map((r) => (r.id === id ? actualizada : r)))
+    setRequisiciones((prev) => prev.map((r) => (r.id === id ? { ...r, ...actualizada } : r)))
   }
 
-  const guardarCampoOC = async (id: string, valor: string) => {
-    const actualizada = await db.actualizarOrdenCompra(id, { oc_numero: valor || null })
-    setOrdenes((prev) => prev.map((o) => (o.id === id ? actualizada : o)))
+  const guardarCampoOC = async (id: string, campo: 'oc_numero' | 'proveedor' | 'fecha_oc', valor: string) => {
+    const actualizada = await db.actualizarOrdenCompra(id, { [campo]: valor || null })
+    setOrdenes((prev) => prev.map((o) => (o.id === id ? { ...o, ...actualizada } : o)))
   }
 
   const TABS: { id: Pestana; etiqueta: string; total: number }[] = [

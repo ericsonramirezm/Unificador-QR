@@ -371,6 +371,14 @@ export interface Requisicion {
 
   created_at: string;
   updated_at: string;
+
+  // No son columnas propias de "requisiciones": se traen con un join a la
+  // Solicitud de Compra de origen (solicitud_compra_id), solo para mostrar
+  // la columna Documento/Fecha de Solicitud en la pestaña RQ sin duplicar
+  // el dato. Ver db.obtenerRequisiciones.
+  documento_url?: string | null;
+  documento_nombre?: string | null;
+  fecha_solicitud?: string | null;
 }
 
 export interface OrdenCompra {
@@ -391,7 +399,18 @@ export interface OrdenCompra {
   unidad?: string | null;
 
   oc_numero?: string | null;
+  // Propios de OC (add_proveedor_fecha_oc.sql): llegan en blanco al avanzar
+  // desde Requisiciones y se completan a mano en la pestaña OC.
+  proveedor?: string | null;
+  fecha_oc?: string | null;
 
   created_at: string;
   updated_at: string;
+
+  // Igual que en Requisicion: se traen con un join (a través de
+  // requisicion_id -> solicitud_compra_id) solo para mostrar la columna
+  // Documento/Fecha de Solicitud en la pestaña OC. Ver db.obtenerOrdenesCompra.
+  documento_url?: string | null;
+  documento_nombre?: string | null;
+  fecha_solicitud?: string | null;
 }

@@ -560,29 +560,47 @@ export const db = {
     return data as SolicitudCompra[]
   },
 
+  // El join a solicitudes_compra trae Documento/Fecha de Solicitud (no son
+  // columnas propias de requisiciones) para mostrar la misma columna en
+  // las tres pestañas sin duplicar el dato; se aplana acá para que el resto
+  // del código maneje un objeto plano, igual que si fueran columnas propias.
   async obtenerRequisiciones(contratoId: string) {
     const { data, error } = await supabase
       .from('requisiciones')
-      .select('*')
+      .select('*, solicitud_compra:solicitud_compra_id(documento_url, documento_nombre, fecha_solicitud)')
       .eq('contrato_id', contratoId)
       .eq('avanzo_a_oc', false)
       .order('created_at', { ascending: false })
       .order('numero_item', { ascending: true })
 
     if (error) throw error
-    return data as Requisicion[]
+    return (data ?? []).map((fila: any) => ({
+      ...fila,
+      documento_url: fila.solicitud_compra?.documento_url ?? null,
+      documento_nombre: fila.solicitud_compra?.documento_nombre ?? null,
+      fecha_solicitud: fila.solicitud_compra?.fecha_solicitud ?? null,
+      solicitud_compra: undefined,
+    })) as Requisicion[]
   },
 
   async obtenerOrdenesCompra(contratoId: string) {
     const { data, error } = await supabase
       .from('ordenes_compra')
-      .select('*')
+      .select(
+        '*, requisicion:requisicion_id(solicitud_compra:solicitud_compra_id(documento_url, documento_nombre, fecha_solicitud))'
+      )
       .eq('contrato_id', contratoId)
       .order('created_at', { ascending: false })
       .order('numero_item', { ascending: true })
 
     if (error) throw error
-    return data as OrdenCompra[]
+    return (data ?? []).map((fila: any) => ({
+      ...fila,
+      documento_url: fila.requisicion?.solicitud_compra?.documento_url ?? null,
+      documento_nombre: fila.requisicion?.solicitud_compra?.documento_nombre ?? null,
+      fecha_solicitud: fila.requisicion?.solicitud_compra?.fecha_solicitud ?? null,
+      requisicion: undefined,
+    })) as OrdenCompra[]
   },
 
   // Botón "Pasar a RQ →" / "Pasar a OC →": recibe un arreglo de ids para
@@ -625,7 +643,7 @@ export const db = {
     return data as Requisicion
   },
 
-  async actualizarOrdenCompra(id: string, updates: Partial<Pick<OrdenCompra, 'oc_numero'>>) {
+  async actualizarOrdenCompra(id: string, updates: Partial<Pick<OrdenCompra, 'oc_numero' | 'proveedor' | 'fecha_oc'>>) {
     const { data, error } = await supabase
       .from('ordenes_compra')
       .update(updates)

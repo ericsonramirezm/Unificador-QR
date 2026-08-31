@@ -7,6 +7,8 @@ import { CeldaEditable } from './CeldaEditable'
 interface TablaRequisicionesProps {
   items: Requisicion[]
   cargando: boolean
+  /** Texto del buscador general (Compras.tsx) — items ya llega pre-filtrado; esto es solo para el mensaje de estado vacío. */
+  busqueda?: string
   onAvanzar: (ids: string[]) => Promise<void>
   onDevolver: (id: string) => Promise<void>
   onGuardarCampo: (id: string, campo: 'rq_numero' | 'fecha_rq' | 'codigo_defontana', valor: string) => Promise<void>
@@ -29,7 +31,7 @@ const NUM_COLUMNAS = 15
 // columna de acciones (entre Fecha RQ y los botones de avance/devolución),
 // no pegado al input. Las filas sin RQ todavía quedan en su propio grupo,
 // "Sin N° RQ", al final.
-export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaRequisicionesProps) => {
+export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaRequisicionesProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [procesando, setProcesando] = useState(false)
 
@@ -130,7 +132,11 @@ export const TablaRequisiciones = ({ items, cargando, onAvanzar, onDevolver, onG
   if (items.length === 0) {
     return (
       <p className="text-sm text-slate-500 py-8 text-center">
-        No hay Requisiciones pendientes. Avanza ítems desde la pestaña Solicitudes de Compra.
+        {busqueda?.trim() ? (
+          <>No hay resultados para "{busqueda}".</>
+        ) : (
+          <>No hay Requisiciones pendientes. Avanza ítems desde la pestaña Solicitudes de Compra.</>
+        )}
       </p>
     )
   }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { NuevaSolicitudCompraModal } from './NuevaSolicitudCompraModal'
 import { TablaSolicitudesCompra } from './TablaSolicitudesCompra'
 import { TablaRequisiciones } from './TablaRequisiciones'
@@ -6,6 +6,7 @@ import { TablaOrdenesCompra } from './TablaOrdenesCompra'
 import { TablaGuiasDespacho } from './TablaGuiasDespacho'
 import { db } from '@lib/supabase'
 import { traducirError } from '@lib/errores'
+import { filtrarPorTexto } from '@lib/buscar'
 import { Contrato, GuiaDespacho, OrdenCompra, Requisicion, SolicitudCompra, Usuario } from '@/types/index'
 
 interface ComprasProps {
@@ -22,13 +23,15 @@ type Pestana = 'sc' | 'rq' | 'oc' | 'gd'
 // siguiente; "Devolver" hace el camino inverso. Por ahora GD es la última
 // etapa definida (podrían agregarse más adelante).
 //
-// La búsqueda general (por Código SC/RQ/OC/Solicitado por/Descripción, u
-// otros campos) queda para un paso aparte: todavía hay dos preguntas de
-// diseño sin responder (qué campos son buscables y si la coincidencia es
-// exacta o parcial).
+// Buscador general (ver @lib/buscar): un único cuadro de texto arriba de
+// las pestañas que filtra las 4 etapas a la vez, insensible a mayúsculas y
+// tildes. El texto persiste al cambiar de pestaña; los contadores de cada
+// pestaña reflejan las coincidencias mientras hay una búsqueda activa, así
+// se ve en qué etapa(s) hay resultados sin tener que entrar a cada una.
 export const Compras = ({ usuario, contrato }: ComprasProps) => {
   const [pestana, setPestana] = useState<Pestana>('sc')
   const [mostrarNuevaSolicitud, setMostrarNuevaSolicitud] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
 
   const [solicitudes, setSolicitudes] = useState<SolicitudCompra[]>([])
   const [requisiciones, setRequisiciones] = useState<Requisicion[]>([])
@@ -36,6 +39,70 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
   const [guias, setGuias] = useState<GuiaDespacho[]>([])
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Campos buscables por etapa: exactamente los que ya se muestran como
+  // columna en la tabla de esa pestaña (ver TablaXxx.tsx). Todo vive en
+  // memoria y no hay red de por medio, así que se filtra en cada tecla sin
+  // debounce.
+  const solicitudesFiltradas = useMemo(
+    () =>
+      filtrarPorTexto(solicitudes, busqueda, (s) => [
+        s.codigo_sc,
+        s.solicitado_por,
+        s.descripcion,
+        s.marca,
+        s.modelo,
+        s.unidad,
+      ]),
+    [solicitudes, busqueda]
+  )
+  const requisicionesFiltradas = useMemo(
+    () =>
+      filtrarPorTexto(requisiciones, busqueda, (r) => [
+        r.rq_numero,
+        r.codigo_defontana,
+        r.codigo_sc,
+        r.solicitado_por,
+        r.descripcion,
+        r.marca,
+        r.modelo,
+        r.unidad,
+      ]),
+    [requisiciones, busqueda]
+  )
+  const ordenesFiltradas = useMemo(
+    () =>
+      filtrarPorTexto(ordenes, busqueda, (o) => [
+        o.oc_numero,
+        o.proveedor,
+        o.rq_numero,
+        o.codigo_defontana,
+        o.codigo_sc,
+        o.solicitado_por,
+        o.descripcion,
+        o.marca,
+        o.modelo,
+        o.unidad,
+      ]),
+    [ordenes, busqueda]
+  )
+  const guiasFiltradas = useMemo(
+    () =>
+      filtrarPorTexto(guias, busqueda, (g) => [
+        g.guia_numero,
+        g.oc_numero,
+        g.proveedor,
+        g.rq_numero,
+        g.codigo_defontana,
+        g.codigo_sc,
+        g.solicitado_por,
+        g.descripcion,
+        g.marca,
+        g.modelo,
+        g.unidad,
+      ]),
+    [guias, busqueda]
+  )
 
   const contratoId = contrato?.id
 
@@ -182,10 +249,10 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
   }
 
   const TABS: { id: Pestana; etiqueta: string; total: number }[] = [
-    { id: 'sc', etiqueta: 'Solicitudes de Compra', total: solicitudes.length },
-    { id: 'rq', etiqueta: 'Requisiciones', total: requisiciones.length },
-    { id: 'oc', etiqueta: 'Órdenes de Compra', total: ordenes.length },
-    { id: 'gd', etiqueta: 'Guías de Despacho', total: guias.length },
+    { id: 'sc', etiqueta: 'Solicitudes de Compra', total: solicitudesFiltradas.length },
+    { id: 'rq', etiqueta: 'Requisiciones', total: requisicionesFiltradas.length },
+    { id: 'oc', etiqueta: 'Órdenes de Compra', total: ordenesFiltradas.length },
+    { id: 'gd', etiqueta: 'Guías de Despacho', total: guiasFiltradas.length },
   ]
 
   return (
@@ -215,6 +282,35 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-4">{error}</p>
       )}
 
+      <div className="relative mb-4">
+        <svg
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar en Compras (Código, Proveedor, Descripción, Solicitado por...)"
+          className="w-full pl-9 pr-9 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+        />
+        {busqueda && (
+          <button
+            type="button"
+            onClick={() => setBusqueda('')}
+            aria-label="Limpiar búsqueda"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
       <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto">
         {TABS.map((tab) => (
           <button
@@ -233,12 +329,19 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
       </div>
 
       {pestana === 'sc' && (
-        <TablaSolicitudesCompra items={solicitudes} cargando={cargando} onAvanzar={avanzarSCaRQ} onEliminar={eliminarSC} />
+        <TablaSolicitudesCompra
+          items={solicitudesFiltradas}
+          cargando={cargando}
+          busqueda={busqueda}
+          onAvanzar={avanzarSCaRQ}
+          onEliminar={eliminarSC}
+        />
       )}
       {pestana === 'rq' && (
         <TablaRequisiciones
-          items={requisiciones}
+          items={requisicionesFiltradas}
           cargando={cargando}
+          busqueda={busqueda}
           onAvanzar={avanzarRQaOC}
           onDevolver={devolverRQaSC}
           onGuardarCampo={guardarCampoRQ}
@@ -247,8 +350,9 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
       )}
       {pestana === 'oc' && (
         <TablaOrdenesCompra
-          items={ordenes}
+          items={ordenesFiltradas}
           cargando={cargando}
+          busqueda={busqueda}
           onAvanzar={avanzarOCaGD}
           onDevolver={devolverOCaRQ}
           onGuardarCampo={guardarCampoOC}
@@ -257,8 +361,9 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
       )}
       {pestana === 'gd' && (
         <TablaGuiasDespacho
-          items={guias}
+          items={guiasFiltradas}
           cargando={cargando}
+          busqueda={busqueda}
           onDevolver={devolverGDaOC}
           onGuardarCampo={guardarCampoGD}
           onEliminar={eliminarGD}

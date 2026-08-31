@@ -6,6 +6,8 @@ import { agruparPorNumero } from '@lib/agrupar'
 interface TablaSolicitudesCompraProps {
   items: SolicitudCompra[]
   cargando: boolean
+  /** Texto del buscador general (Compras.tsx) — items ya llega pre-filtrado; esto es solo para el mensaje de estado vacío. */
+  busqueda?: string
   /** Avanza uno o varios ítems a Requisiciones (checkbox o botón por fila). */
   onAvanzar: (ids: string[]) => Promise<void>
   /** Elimina un ítem para siempre (no pasa por ninguna etapa). */
@@ -25,7 +27,7 @@ const NUM_COLUMNAS = 13
 // solicitud), con una banda de fondo alternada por grupo y una línea más
 // marcada entre uno y otro — así quedan visualmente juntos aunque haya
 // muchas solicitudes en la lista.
-export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar, onEliminar }: TablaSolicitudesCompraProps) => {
+export const TablaSolicitudesCompra = ({ items, cargando, busqueda, onAvanzar, onEliminar }: TablaSolicitudesCompraProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [avanzando, setAvanzando] = useState(false)
   const [eliminando, setEliminando] = useState(false)
@@ -91,7 +93,11 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar, onEliminar 
   if (items.length === 0) {
     return (
       <p className="text-sm text-slate-500 py-8 text-center">
-        No hay Solicitudes de Compra pendientes. Crea una con "Nueva Solicitud de Compra".
+        {busqueda?.trim() ? (
+          <>No hay resultados para "{busqueda}".</>
+        ) : (
+          <>No hay Solicitudes de Compra pendientes. Crea una con "Nueva Solicitud de Compra".</>
+        )}
       </p>
     )
   }

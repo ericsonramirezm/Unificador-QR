@@ -7,6 +7,8 @@ import { CeldaEditable } from './CeldaEditable'
 interface TablaGuiasDespachoProps {
   items: GuiaDespacho[]
   cargando: boolean
+  /** Texto del buscador general (Compras.tsx) — items ya llega pre-filtrado; esto es solo para el mensaje de estado vacío. */
+  busqueda?: string
   onDevolver: (id: string) => Promise<void>
   onGuardarCampo: (id: string, campo: 'guia_numero' | 'fecha_guia' | 'cantidad_recibida', valor: string) => Promise<void>
   /** Elimina un ítem para siempre — no vuelve a Órdenes de Compra (a diferencia de onDevolver). */
@@ -56,7 +58,7 @@ const calcularEstadoRecepcion = (item: GuiaDespacho): EstadoRecepcion => {
   return { pendiente, etiqueta: 'Exceso de Recepción', claseFila: 'bg-red-50', claseTexto: 'text-red-700' }
 }
 
-export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo, onEliminar }: TablaGuiasDespachoProps) => {
+export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGuardarCampo, onEliminar }: TablaGuiasDespachoProps) => {
   const [procesando, setProcesando] = useState(false)
 
   const [guiaPendiente, setGuiaPendiente] = useState<Record<string, string>>({})
@@ -119,7 +121,11 @@ export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo
   if (items.length === 0) {
     return (
       <p className="text-sm text-slate-500 py-8 text-center">
-        No hay Guías de Despacho todavía. Avanza ítems desde la pestaña Órdenes de Compra.
+        {busqueda?.trim() ? (
+          <>No hay resultados para "{busqueda}".</>
+        ) : (
+          <>No hay Guías de Despacho todavía. Avanza ítems desde la pestaña Órdenes de Compra.</>
+        )}
       </p>
     )
   }

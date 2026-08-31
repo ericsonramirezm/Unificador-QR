@@ -7,6 +7,8 @@ import { CeldaEditable } from './CeldaEditable'
 interface TablaOrdenesCompraProps {
   items: OrdenCompra[]
   cargando: boolean
+  /** Texto del buscador general (Compras.tsx) — items ya llega pre-filtrado; esto es solo para el mensaje de estado vacío. */
+  busqueda?: string
   onAvanzar: (ids: string[]) => Promise<void>
   onDevolver: (id: string) => Promise<void>
   onGuardarCampo: (id: string, campo: 'oc_numero' | 'proveedor' | 'fecha_oc', valor: string) => Promise<void>
@@ -33,7 +35,7 @@ const NUM_COLUMNAS = 18
 // a simple vista que esa OC mezcla proveedores y conviene revisar si
 // debería separarse. Si todos comparten el mismo proveedor (el caso
 // normal), no se muestra ningún mini-encabezado.
-export const TablaOrdenesCompra = ({ items, cargando, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
+export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [procesando, setProcesando] = useState(false)
 
@@ -133,7 +135,11 @@ export const TablaOrdenesCompra = ({ items, cargando, onAvanzar, onDevolver, onG
   if (items.length === 0) {
     return (
       <p className="text-sm text-slate-500 py-8 text-center">
-        No hay Órdenes de Compra todavía. Avanza ítems desde la pestaña Requisiciones.
+        {busqueda?.trim() ? (
+          <>No hay resultados para "{busqueda}".</>
+        ) : (
+          <>No hay Órdenes de Compra todavía. Avanza ítems desde la pestaña Requisiciones.</>
+        )}
       </p>
     )
   }

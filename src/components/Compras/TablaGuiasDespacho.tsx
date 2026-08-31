@@ -13,7 +13,7 @@ interface TablaGuiasDespachoProps {
   onEliminar: (id: string) => Promise<void>
 }
 
-const NUM_COLUMNAS = 19
+const NUM_COLUMNAS = 21
 
 // Cuarta etapa (add_guias_despacho.sql). Mismas columnas heredadas que en
 // OC (RQ/Fecha RQ/Proveedor/OC/Fecha OC, todas de solo lectura acá) más
@@ -26,6 +26,36 @@ const NUM_COLUMNAS = 19
 // grupo mientras se está escribiendo el número. Por eso el botón "Guardar"
 // vive en la columna de acciones, entre Cantidad Recibida y "← OC". Las
 // filas sin Guía todavía quedan juntas en "Sin N° Guía", al final.
+//
+// "Pendiente" y "Estado de Recepción" se calculan solas (Cantidad -
+// Cantidad Recibida), no son columnas editables ni se guardan en la base:
+//   - Cantidad Recibida todavía vacía -> neutral, sin resaltado ("—").
+//   - Pendiente = 0                   -> verde, "Recepción Completa".
+//   - Pendiente > 0 (llegó de menos)  -> amarillo, "Recepción Parcial".
+//   - Pendiente < 0 (llegó de más)    -> rojo, "Exceso de Recepción".
+// El color de fondo calculado acá reemplaza la banda alternada del grupo
+// para esa fila (tiene prioridad visual sobre el agrupamiento).
+type EstadoRecepcion = {
+  pendiente: number | null
+  etiqueta: string
+  claseFila: string
+  claseTexto: string
+}
+
+const calcularEstadoRecepcion = (item: GuiaDespacho): EstadoRecepcion => {
+  if (item.cantidad_recibida == null) {
+    return { pendiente: null, etiqueta: '—', claseFila: '', claseTexto: 'text-slate-300' }
+  }
+  const pendiente = item.cantidad - item.cantidad_recibida
+  if (pendiente === 0) {
+    return { pendiente, etiqueta: 'Recepción Completa', claseFila: 'bg-green-50', claseTexto: 'text-green-700' }
+  }
+  if (pendiente > 0) {
+    return { pendiente, etiqueta: 'Recepción Parcial', claseFila: 'bg-amber-50', claseTexto: 'text-amber-700' }
+  }
+  return { pendiente, etiqueta: 'Exceso de Recepción', claseFila: 'bg-red-50', claseTexto: 'text-red-700' }
+}
+
 export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo, onEliminar }: TablaGuiasDespachoProps) => {
   const [procesando, setProcesando] = useState(false)
 
@@ -99,7 +129,7 @@ export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo
   return (
     <div>
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-sm min-w-[2650px]">
+        <table className="w-full text-sm min-w-[2950px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
               <th className="text-left py-2 px-2 w-32">Solicitado por</th>
@@ -121,6 +151,8 @@ export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo
               <th className="text-left py-2 px-2 w-40">Guía N°</th>
               <th className="text-left py-2 px-2 w-28">Fecha Guía</th>
               <th className="text-left py-2 px-2 w-32">Cantidad Recibida</th>
+              <th className="text-right py-2 px-2 w-24">Pendiente</th>
+              <th className="text-left py-2 px-2 w-44">Estado de Recepción</th>
               <th className="w-64"></th>
             </tr>
           </thead>
@@ -139,8 +171,10 @@ export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo
                       {grupo.etiqueta} · {grupo.filas.length} ítem{grupo.filas.length === 1 ? '' : 's'}
                     </td>
                   </tr>
-                  {grupo.filas.map((item) => (
-                    <tr key={item.id} className={banda ? 'bg-slate-50/40' : undefined}>
+                  {grupo.filas.map((item) => {
+                    const estado = calcularEstadoRecepcion(item)
+                    return (
+                    <tr key={item.id} className={estado.claseFila || (banda ? 'bg-slate-50/40' : undefined)}>
                       <td className="py-2 px-2">{item.solicitado_por}</td>
                       <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
                       <td className="py-2 px-2 text-slate-500">{item.codigo_defontana || '—'}</td>
@@ -204,6 +238,10 @@ export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo
                           onGuardar={(v) => onGuardarCampo(item.id, 'cantidad_recibida', v)}
                         />
                       </td>
+                      <td className={`py-2 px-2 text-right font-semibold ${estado.claseTexto}`}>
+                        {estado.pendiente ?? '—'}
+                      </td>
+                      <td className={`py-2 px-2 font-semibold ${estado.claseTexto}`}>{estado.etiqueta}</td>
                       <td className="py-2 px-2">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
                           <button
@@ -233,7 +271,8 @@ export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </Fragment>
               )
             })}
@@ -242,7 +281,8 @@ export const TablaGuiasDespacho = ({ items, cargando, onDevolver, onGuardarCampo
       </div>
       <p className="text-xs text-slate-500 mt-2">
         Fecha de Guía y Cantidad Recibida se guardan solas al salir del campo. El número de Guía necesita presionar
-        "Guardar" (o Enter).
+        "Guardar" (o Enter). Pendiente y Estado de Recepción se calculan solos (Cantidad − Cantidad Recibida): en blanco
+        hasta que se ingrese Cantidad Recibida, verde cuando llega justo, amarillo si falta, rojo si llegó de más.
       </p>
     </div>
   )

@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { UserRole, SolicitudCompra, Requisicion, OrdenCompra } from '@/types/index'
+import { UserRole, SolicitudCompra, Requisicion, OrdenCompra, GuiaDespacho } from '@/types/index'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -583,6 +583,8 @@ export const db = {
     })) as Requisicion[]
   },
 
+  // Igual que obtenerRequisiciones: solo trae lo que todavía no avanzó a
+  // la siguiente etapa (avanzo_a_gd = false).
   async obtenerOrdenesCompra(contratoId: string) {
     const { data, error } = await supabase
       .from('ordenes_compra')
@@ -590,6 +592,7 @@ export const db = {
         '*, requisicion:requisicion_id(solicitud_compra:solicitud_compra_id(documento_url, documento_nombre, fecha_solicitud))'
       )
       .eq('contrato_id', contratoId)
+      .eq('avanzo_a_gd', false)
       .order('created_at', { ascending: false })
       .order('numero_item', { ascending: true })
 
@@ -601,6 +604,30 @@ export const db = {
       fecha_solicitud: fila.requisicion?.solicitud_compra?.fecha_solicitud ?? null,
       requisicion: undefined,
     })) as OrdenCompra[]
+  },
+
+  // El join anidado (orden_compra -> requisicion -> solicitud_compra) trae
+  // Documento/Fecha de Solicitud, igual que en obtenerRequisiciones/
+  // obtenerOrdenesCompra, para mostrar la misma columna en las cuatro
+  // pestañas sin duplicar el dato.
+  async obtenerGuiasDespacho(contratoId: string) {
+    const { data, error } = await supabase
+      .from('guias_despacho')
+      .select(
+        '*, orden_compra:orden_compra_id(requisicion:requisicion_id(solicitud_compra:solicitud_compra_id(documento_url, documento_nombre, fecha_solicitud)))'
+      )
+      .eq('contrato_id', contratoId)
+      .order('created_at', { ascending: false })
+      .order('numero_item', { ascending: true })
+
+    if (error) throw error
+    return (data ?? []).map((fila: any) => ({
+      ...fila,
+      documento_url: fila.orden_compra?.requisicion?.solicitud_compra?.documento_url ?? null,
+      documento_nombre: fila.orden_compra?.requisicion?.solicitud_compra?.documento_nombre ?? null,
+      fecha_solicitud: fila.orden_compra?.requisicion?.solicitud_compra?.fecha_solicitud ?? null,
+      orden_compra: undefined,
+    })) as GuiaDespacho[]
   },
 
   // Botón "Pasar a RQ →" / "Pasar a OC →": recibe un arreglo de ids para
@@ -615,6 +642,11 @@ export const db = {
     if (error) throw error
   },
 
+  async avanzarOCaGD(itemIds: string[]) {
+    const { error } = await supabase.rpc('avanzar_oc_a_gd', { p_item_ids: itemIds })
+    if (error) throw error
+  },
+
   // Botón "← Devolver": solo de a una fila (así se aprobó en el mockup).
   async devolverRQaSC(requisicionId: string) {
     const { error } = await supabase.rpc('devolver_rq_a_sc', { p_requisicion_id: requisicionId })
@@ -623,6 +655,11 @@ export const db = {
 
   async devolverOCaRQ(ordenId: string) {
     const { error } = await supabase.rpc('devolver_oc_a_rq', { p_orden_id: ordenId })
+    if (error) throw error
+  },
+
+  async devolverGDaOC(guiaId: string) {
+    const { error } = await supabase.rpc('devolver_gd_a_oc', { p_guia_id: guiaId })
     if (error) throw error
   },
 
@@ -655,6 +692,21 @@ export const db = {
     return data as OrdenCompra
   },
 
+  async actualizarGuiaDespacho(
+    id: string,
+    updates: Partial<Pick<GuiaDespacho, 'guia_numero' | 'fecha_guia' | 'cantidad_recibida'>>
+  ) {
+    const { data, error } = await supabase
+      .from('guias_despacho')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data as GuiaDespacho
+  },
+
   // Botón "Eliminar": borra el ítem para siempre, no vuelve a ninguna
   // etapa anterior (a diferencia de devolverRQaSC/devolverOCaRQ). Como
   // cada pestaña solo muestra ítems que todavía no avanzaron de etapa
@@ -673,6 +725,11 @@ export const db = {
 
   async eliminarOrdenCompra(id: string) {
     const { error } = await supabase.from('ordenes_compra').delete().eq('id', id)
+    if (error) throw error
+  },
+
+  async eliminarGuiaDespacho(id: string) {
+    const { error } = await supabase.from('guias_despacho').delete().eq('id', id)
     if (error) throw error
   },
 }

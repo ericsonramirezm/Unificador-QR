@@ -12,13 +12,14 @@ interface TablaSolicitudesCompraProps {
   onEliminar: (id: string) => Promise<void>
 }
 
-const NUM_COLUMNAS = 16
+const NUM_COLUMNAS = 13
 
-// Columnas unificadas: las tres pestañas (SC/RQ/OC) muestran el mismo set,
-// en el mismo orden, así se ve de un vistazo en qué parte del ciclo
-// SC -> RQ -> OC va cada ítem. Acá, como el ítem todavía no avanzó, los
-// campos propios de RQ (Código Defontana, RQ, Fecha RQ) y de OC (Proveedor,
-// OC, Fecha OC) todavía no existen — se muestran en blanco ("—").
+// Columnas unificadas con el resto de Compras, en el mismo orden. Acá,
+// como el ítem todavía no avanzó, el campo propio de RQ (Código
+// Defontana) todavía no existe — se muestra en blanco ("—"). Las columnas
+// propias de RQ (RQ, Fecha RQ) y de OC (Proveedor, OC, Fecha OC) ya no se
+// muestran acá: son de etapas posteriores y este ítem ni siquiera llegó a
+// Requisiciones.
 //
 // Las filas se agrupan por Código SC (todos los ítems de una misma
 // solicitud), con una banda de fondo alternada por grupo y una línea más
@@ -116,7 +117,7 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar, onEliminar 
       )}
 
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-sm min-w-[1700px]">
+        <table className="w-full text-sm min-w-[1450px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
               <th className="py-2 px-2 w-8">
@@ -138,9 +139,6 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar, onEliminar 
               <th className="text-left py-2 px-2 w-24">Solicitud de Compra</th>
               <th className="text-left py-2 px-2 w-24">Fecha de Solicitud</th>
               <th className="text-left py-2 px-2 w-20">Documento</th>
-              <th className="text-left py-2 px-2 w-36">Proveedor</th>
-              <th className="text-left py-2 px-2 w-24">OC</th>
-              <th className="text-left py-2 px-2 w-24">Fecha OC</th>
               <th className="w-40"></th>
             </tr>
           </thead>
@@ -193,9 +191,6 @@ export const TablaSolicitudesCompra = ({ items, cargando, onAvanzar, onEliminar 
                           <span className="text-slate-300 text-xs">—</span>
                         )}
                       </td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
-                      <td className="py-2 px-2 text-slate-300">—</td>
                       <td className="py-2 px-2">
                         <div className="flex items-center justify-end gap-3">
                           <button

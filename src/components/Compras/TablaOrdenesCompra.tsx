@@ -7,17 +7,19 @@ import { CeldaEditable } from './CeldaEditable'
 interface TablaOrdenesCompraProps {
   items: OrdenCompra[]
   cargando: boolean
+  onAvanzar: (ids: string[]) => Promise<void>
   onDevolver: (id: string) => Promise<void>
   onGuardarCampo: (id: string, campo: 'oc_numero' | 'proveedor' | 'fecha_oc', valor: string) => Promise<void>
   /** Elimina un ítem para siempre — no vuelve a Requisiciones (a diferencia de onDevolver). */
   onEliminar: (id: string) => Promise<void>
 }
 
-const NUM_COLUMNAS = 17
+const NUM_COLUMNAS = 18
 
-// Última etapa: mismas columnas que SC y RQ. Código Defontana/RQ/Fecha RQ
-// ya vienen heredados de la pestaña RQ (solo lectura acá); Proveedor, OC y
-// Fecha OC son los propios de esta etapa y se completan acá.
+// Mismas columnas que SC y RQ. Código Defontana/RQ/Fecha RQ ya vienen
+// heredados de la pestaña RQ (solo lectura acá); Proveedor, OC y Fecha OC
+// son los propios de esta etapa y se completan acá. Desde acá se avanza a
+// Guías de Despacho (última etapa definida por ahora).
 //
 // Se agrupa por OC, mismo criterio que RQ: el campo OC solo guarda al
 // presionar "Guardar" (no al perder el foco), para que la fila no salte de
@@ -31,8 +33,42 @@ const NUM_COLUMNAS = 17
 // a simple vista que esa OC mezcla proveedores y conviene revisar si
 // debería separarse. Si todos comparten el mismo proveedor (el caso
 // normal), no se muestra ningún mini-encabezado.
-export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
+export const TablaOrdenesCompra = ({ items, cargando, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [procesando, setProcesando] = useState(false)
+
+  const alternarFila = (id: string) => {
+    setSeleccion((prev) => {
+      const copia = new Set(prev)
+      if (copia.has(id)) copia.delete(id)
+      else copia.add(id)
+      return copia
+    })
+  }
+
+  const alternarTodas = () => {
+    setSeleccion((prev) => (prev.size === items.length ? new Set() : new Set(items.map((i) => i.id))))
+  }
+
+  const avanzarSeleccion = async () => {
+    if (seleccion.size === 0) return
+    setProcesando(true)
+    try {
+      await onAvanzar(Array.from(seleccion))
+      setSeleccion(new Set())
+    } finally {
+      setProcesando(false)
+    }
+  }
+
+  const avanzarUna = async (id: string) => {
+    setProcesando(true)
+    try {
+      await onAvanzar([id])
+    } finally {
+      setProcesando(false)
+    }
+  }
 
   // Igual que RQ en TablaRequisiciones: el valor de OC se maneja acá (no
   // en un CeldaEditable) para poder mostrar el botón "Guardar" en la
@@ -105,7 +141,15 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
   const grupos = agruparPorNumero(items, (item) => item.oc_numero, 'Sin N° OC')
 
   const renderFila = (item: OrdenCompra, banda: boolean) => (
-    <tr key={item.id} className={banda ? 'bg-slate-50/40' : undefined}>
+    <tr key={item.id} className={seleccion.has(item.id) ? 'bg-blue-50/50' : banda ? 'bg-slate-50/40' : undefined}>
+      <td className="py-2 px-2">
+        <input
+          type="checkbox"
+          aria-label={`Seleccionar ${item.codigo_sc} ítem ${item.numero_item}`}
+          checked={seleccion.has(item.id)}
+          onChange={() => alternarFila(item.id)}
+        />
+      </td>
       <td className="py-2 px-2">{item.solicitado_por}</td>
       <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
       <td className="py-2 px-2 text-slate-500">{item.codigo_defontana || '—'}</td>
@@ -175,6 +219,14 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
           </button>
           <button
             type="button"
+            onClick={() => avanzarUna(item.id)}
+            disabled={procesando}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60"
+          >
+            GD →
+          </button>
+          <button
+            type="button"
             onClick={() => eliminar(item.id, item.codigo_sc, item.numero_item)}
             disabled={procesando}
             className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
@@ -188,10 +240,34 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
 
   return (
     <div>
+      {seleccion.size > 0 && (
+        <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+          <span className="text-sm text-blue-800">
+            {seleccion.size} seleccionado{seleccion.size === 1 ? '' : 's'}
+          </span>
+          <button
+            type="button"
+            onClick={avanzarSeleccion}
+            disabled={procesando}
+            className="px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60"
+          >
+            Pasar a Guías de Despacho →
+          </button>
+        </div>
+      )}
+
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-sm min-w-[2530px]">
+        <table className="w-full text-sm min-w-[2600px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
+              <th className="py-2 px-2 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Seleccionar todas"
+                  checked={seleccion.size === items.length}
+                  onChange={alternarTodas}
+                />
+              </th>
               <th className="text-left py-2 px-2 w-32">Solicitado por</th>
               <th className="text-left py-2 px-2 w-10">N°</th>
               <th className="text-left py-2 px-2 w-28">Código Defontana</th>

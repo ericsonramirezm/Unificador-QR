@@ -3,7 +3,7 @@ import { useState } from 'react'
 interface CeldaEditableProps {
   valor: string
   onGuardar: (nuevoValor: string) => Promise<void>
-  tipo?: 'text' | 'date'
+  tipo?: 'text' | 'date' | 'number'
   placeholder?: string
   /**
    * Si es true, no guarda al perder el foco — hay que presionar "Guardar"

@@ -404,12 +404,55 @@ export interface OrdenCompra {
   proveedor?: string | null;
   fecha_oc?: string | null;
 
+  // true = ya se generó su fila en "guias_despacho"; se oculta de este
+  // listado pero el registro se conserva (add_guias_despacho.sql).
+  avanzo_a_gd: boolean;
+
   created_at: string;
   updated_at: string;
 
   // Igual que en Requisicion: se traen con un join (a través de
   // requisicion_id -> solicitud_compra_id) solo para mostrar la columna
   // Documento/Fecha de Solicitud en la pestaña OC. Ver db.obtenerOrdenesCompra.
+  documento_url?: string | null;
+  documento_nombre?: string | null;
+  fecha_solicitud?: string | null;
+}
+
+export interface GuiaDespacho {
+  id: string;
+  orden_compra_id: string;
+  contrato_id: string;
+
+  // Heredado de OC (que a su vez lo heredó de RQ y de SC) al momento de
+  // avanzar. Snapshot: no se vuelve a leer de ordenes_compra después.
+  rq_numero?: string | null;
+  fecha_rq?: string | null;
+  codigo_defontana?: string | null;
+  codigo_sc: string;
+  solicitado_por: string;
+  numero_item: number;
+  descripcion: string;
+  marca?: string | null;
+  modelo?: string | null;
+  cantidad: number;
+  unidad?: string | null;
+  oc_numero?: string | null;
+  proveedor?: string | null;
+  fecha_oc?: string | null;
+
+  // Propios de GD (add_guias_despacho.sql): llegan en blanco al avanzar
+  // desde Órdenes de Compra y se completan a mano en esta pestaña.
+  guia_numero?: string | null;
+  fecha_guia?: string | null;
+  cantidad_recibida?: number | null;
+
+  created_at: string;
+  updated_at: string;
+
+  // Igual que en Requisicion/OrdenCompra: se trae con un join (a través de
+  // orden_compra_id -> requisicion_id -> solicitud_compra_id) solo para
+  // mostrar la columna Documento/Fecha de Solicitud. Ver db.obtenerGuiasDespacho.
   documento_url?: string | null;
   documento_nombre?: string | null;
   fecha_solicitud?: string | null;

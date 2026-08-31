@@ -3,21 +3,24 @@ import { NuevaSolicitudCompraModal } from './NuevaSolicitudCompraModal'
 import { TablaSolicitudesCompra } from './TablaSolicitudesCompra'
 import { TablaRequisiciones } from './TablaRequisiciones'
 import { TablaOrdenesCompra } from './TablaOrdenesCompra'
+import { TablaGuiasDespacho } from './TablaGuiasDespacho'
 import { db } from '@lib/supabase'
 import { traducirError } from '@lib/errores'
-import { Contrato, OrdenCompra, Requisicion, SolicitudCompra, Usuario } from '@/types/index'
+import { Contrato, GuiaDespacho, OrdenCompra, Requisicion, SolicitudCompra, Usuario } from '@/types/index'
 
 interface ComprasProps {
   usuario: Usuario
   contrato?: Contrato | null
 }
 
-type Pestana = 'sc' | 'rq' | 'oc'
+type Pestana = 'sc' | 'rq' | 'oc' | 'gd'
 
 // Módulo de Compras: Solicitud de Compra (SC) → Requisición (RQ) → Orden
-// de Compra (OC), como tres pestañas separadas por etapa — ver
-// add_compras.sql. Cada ítem que avanza de etapa desaparece de su pestaña
-// de origen y aparece en la siguiente; "Devolver" hace el camino inverso.
+// de Compra (OC) → Guía de Despacho (GD), como cuatro pestañas separadas
+// por etapa — ver add_compras.sql y add_guias_despacho.sql. Cada ítem que
+// avanza de etapa desaparece de su pestaña de origen y aparece en la
+// siguiente; "Devolver" hace el camino inverso. Por ahora GD es la última
+// etapa definida (podrían agregarse más adelante).
 //
 // La búsqueda general (por Código SC/RQ/OC/Solicitado por/Descripción, u
 // otros campos) queda para un paso aparte: todavía hay dos preguntas de
@@ -30,6 +33,7 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
   const [solicitudes, setSolicitudes] = useState<SolicitudCompra[]>([])
   const [requisiciones, setRequisiciones] = useState<Requisicion[]>([])
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
+  const [guias, setGuias] = useState<GuiaDespacho[]>([])
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -40,14 +44,16 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
     setCargando(true)
     setError(null)
     try {
-      const [sc, rq, oc] = await Promise.all([
+      const [sc, rq, oc, gd] = await Promise.all([
         db.obtenerSolicitudesCompra(contratoId),
         db.obtenerRequisiciones(contratoId),
         db.obtenerOrdenesCompra(contratoId),
+        db.obtenerGuiasDespacho(contratoId),
       ])
       setSolicitudes(sc)
       setRequisiciones(rq)
       setOrdenes(oc)
+      setGuias(gd)
     } catch (err) {
       setError(traducirError(err, 'No se pudo cargar el módulo de Compras'))
     } finally {
@@ -78,6 +84,15 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
     }
   }
 
+  const avanzarOCaGD = async (ids: string[]) => {
+    try {
+      await db.avanzarOCaGD(ids)
+      await cargarTodo()
+    } catch (err) {
+      setError(traducirError(err, 'No se pudo pasar el ítem a Guías de Despacho'))
+    }
+  }
+
   const devolverRQaSC = async (id: string) => {
     try {
       await db.devolverRQaSC(id)
@@ -96,6 +111,15 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
     }
   }
 
+  const devolverGDaOC = async (id: string) => {
+    try {
+      await db.devolverGDaOC(id)
+      await cargarTodo()
+    } catch (err) {
+      setError(traducirError(err, 'No se pudo devolver el ítem a Órdenes de Compra'))
+    }
+  }
+
   const guardarCampoRQ = async (id: string, campo: 'rq_numero' | 'fecha_rq' | 'codigo_defontana', valor: string) => {
     // actualizarRequisicion no trae el join a solicitudes_compra (Documento/
     // Fecha de Solicitud): se combina con la fila que ya estaba en memoria
@@ -107,6 +131,15 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
   const guardarCampoOC = async (id: string, campo: 'oc_numero' | 'proveedor' | 'fecha_oc', valor: string) => {
     const actualizada = await db.actualizarOrdenCompra(id, { [campo]: valor || null })
     setOrdenes((prev) => prev.map((o) => (o.id === id ? { ...o, ...actualizada } : o)))
+  }
+
+  const guardarCampoGD = async (id: string, campo: 'guia_numero' | 'fecha_guia' | 'cantidad_recibida', valor: string) => {
+    // Igual que guardarCampoOC: actualizarGuiaDespacho no trae el join
+    // anidado (Documento/Fecha de Solicitud), se combina con la fila que ya
+    // estaba en memoria para no perder esas columnas de la vista.
+    const valorFinal = campo === 'cantidad_recibida' ? (valor === '' ? null : Number(valor)) : valor || null
+    const actualizada = await db.actualizarGuiaDespacho(id, { [campo]: valorFinal })
+    setGuias((prev) => prev.map((g) => (g.id === id ? { ...g, ...actualizada } : g)))
   }
 
   // "Eliminar": borra para siempre, no vuelve a la etapa anterior (a
@@ -139,10 +172,20 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
     }
   }
 
+  const eliminarGD = async (id: string) => {
+    try {
+      await db.eliminarGuiaDespacho(id)
+      await cargarTodo()
+    } catch (err) {
+      setError(traducirError(err, 'No se pudo eliminar la Guía de Despacho'))
+    }
+  }
+
   const TABS: { id: Pestana; etiqueta: string; total: number }[] = [
     { id: 'sc', etiqueta: 'Solicitudes de Compra', total: solicitudes.length },
     { id: 'rq', etiqueta: 'Requisiciones', total: requisiciones.length },
     { id: 'oc', etiqueta: 'Órdenes de Compra', total: ordenes.length },
+    { id: 'gd', etiqueta: 'Guías de Despacho', total: guias.length },
   ]
 
   return (
@@ -206,9 +249,19 @@ export const Compras = ({ usuario, contrato }: ComprasProps) => {
         <TablaOrdenesCompra
           items={ordenes}
           cargando={cargando}
+          onAvanzar={avanzarOCaGD}
           onDevolver={devolverOCaRQ}
           onGuardarCampo={guardarCampoOC}
           onEliminar={eliminarOC}
+        />
+      )}
+      {pestana === 'gd' && (
+        <TablaGuiasDespacho
+          items={guias}
+          cargando={cargando}
+          onDevolver={devolverGDaOC}
+          onGuardarCampo={guardarCampoGD}
+          onEliminar={eliminarGD}
         />
       )}
 

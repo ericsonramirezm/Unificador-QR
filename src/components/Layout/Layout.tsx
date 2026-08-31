@@ -3,7 +3,7 @@ import { auth } from '@lib/supabase'
 import { formatearCargo } from '@lib/formato'
 import { useEffect, useState } from 'react'
 
-type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras'
+type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras' | 'bodega'
 
 interface LayoutProps {
   usuario: Usuario | null
@@ -137,6 +137,21 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
               label="Compras"
               active={activeView === 'compras'}
               onClick={() => irA('compras')}
+              expanded={navExpanded || menuMovilAbierto}
+            />
+          )}
+
+          {/* Bodega: módulo fusionado desde la app standalone Bodega (ver
+              components/Bodega/Bodega.tsx) — gateado por `rol_bodega`, un
+              permiso de módulo separado del `rol` general (mismo patrón que
+              Daily Report/ParteDiario), no por `usuario.rol`. Colocado justo
+              después de Compras — posición razonable, no un pedido explícito. */}
+          {usuario?.rol_bodega && (
+            <NavItem
+              icon="📦"
+              label="Bodega"
+              active={activeView === 'bodega'}
+              onClick={() => irA('bodega')}
               expanded={navExpanded || menuMovilAbierto}
             />
           )}

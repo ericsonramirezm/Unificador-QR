@@ -24,6 +24,7 @@ const ParteDiarioList = lazy(() =>
   import('@components/ParteDiario/ParteDiarioList').then((m) => ({ default: m.ParteDiarioList }))
 )
 const Compras = lazy(() => import('@components/Compras/Compras').then((m) => ({ default: m.Compras })))
+const Bodega = lazy(() => import('@components/Bodega/Bodega').then((m) => ({ default: m.Bodega })))
 
 const CargandoVista = () => (
   <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
@@ -32,7 +33,7 @@ const CargandoVista = () => (
   </div>
 )
 
-type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras'
+type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras' | 'bodega'
 
 export function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
@@ -129,6 +130,8 @@ export function App() {
           (usuario.rol === UserRole.COORDINADOR || usuario.rol === UserRole.CONSULTOR) && (
             <Compras usuario={usuario} contrato={contratoActivo} />
           )}
+
+        {activeView === 'bodega' && <Bodega usuario={usuario} />}
       </Suspense>
 
       {activeView === 'config' && (

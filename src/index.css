@@ -18,3 +18,50 @@ html, body {
 #root {
   height: 100%;
 }
+
+/* --------------------------------------------------------------------------
+   Módulo Bodega (ver src/components/Bodega/) — portado desde
+   Bodega/bodega-app/src/index.css en la Fase 1 de la fusión. Solo estas tres
+   reglas reales: no se porta `@import 'tailwindcss'` (Tailwind 4, no aplica
+   acá) ni la clase de fondo/texto de Bodega, para no cambiar el look global
+   de Unificador-QR.
+   -------------------------------------------------------------------------- */
+
+/* En el celular Bodega se usa con una mano y a veces con guantes: nada de
+   zoom accidental por doble toque al presionar un botón. */
+body {
+  touch-action: manipulation;
+}
+
+/* Evita que iOS haga zoom al enfocar un input (ocurre bajo los 16px). */
+input,
+select,
+textarea {
+  font-size: max(16px, 1rem);
+}
+
+/* Vista de impresión de Bodega — vale de salida (ValeSalida.tsx) y listados
+   de movimientos (pages/Movimientos.tsx). Se oculta todo por visibilidad (no
+   por display) para no dejar el hueco en blanco del layout desaparecido. */
+@media print {
+  body.imprimiendo * {
+    visibility: hidden;
+  }
+  body.imprimiendo .area-impresion,
+  body.imprimiendo .area-impresion * {
+    visibility: visible;
+  }
+  body.imprimiendo .area-impresion {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 0;
+    background: white;
+  }
+  body.imprimiendo .no-imprimir {
+    display: none !important;
+  }
+  @page {
+    margin: 14mm;
+  }
+}

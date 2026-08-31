@@ -15,6 +15,20 @@ export enum UserStatus {
   INACTIVO = 'inactivo',
 }
 
+// Rol dentro del módulo Bodega (ver components/Bodega/) — coexiste con
+// UserRole, no se combinan en un único enum: no son 1 a 1 (un coordinador
+// puede necesitar ser además ADMIN de Bodega; un consultor general podría
+// ser BODEGUERO). Mismo patrón de permisos por módulo desacoplados del rol
+// general que ya sigue ParteDiario/permisos.ts. `rol_bodega` nulo/ausente
+// significa "sin acceso a Bodega", igual criterio que ya usa Layout.tsx
+// para ocultar ítems del menú.
+export enum RolBodega {
+  ADMIN = 'ADMIN',
+  BODEGUERO = 'BODEGUERO',
+  CONSULTA = 'CONSULTA',
+  PREVENCIONISTA = 'PREVENCIONISTA',
+}
+
 export enum DocumentType {
   PROTOCOLO = 'Protocolo',
   IRL = 'IRL',
@@ -65,6 +79,15 @@ export interface Usuario {
   // vez de un nombre fijo. Puede no existir todavía (coordinador sin
   // firma cargada aún).
   firma_url?: string;
+  // Módulo Bodega (ver components/Bodega/): rol específico de ese módulo y
+  // la bodega elegida en la sesión. Ausentes/null = sin acceso a Bodega.
+  // TEMPORAL Fase 1-2: mientras el módulo siga apuntando al Supabase viejo
+  // de Bodega, estas columnas todavía no existen en `usuarios` de
+  // Unificador-QR — el gate de Bodega.tsx las trata como siempre null y
+  // usa un useState local para la bodega elegida (ver Bodega.tsx). Fase 4
+  // las agrega de verdad a la tabla y las llena desde ahí.
+  rol_bodega?: RolBodega | null;
+  bodega_actual_id?: string | null;
 }
 
 export interface Contrato {

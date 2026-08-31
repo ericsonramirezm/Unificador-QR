@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react'
 import { OrdenCompra } from '@/types/index'
 import { formatearFechaCorta } from '@lib/formato'
-import { agruparPorNumero } from '@lib/agrupar'
+import { agruparPorNumero, agruparPorProveedor } from '@lib/agrupar'
 import { CeldaEditable } from './CeldaEditable'
 
 interface TablaOrdenesCompraProps {
@@ -24,6 +24,13 @@ const NUM_COLUMNAS = 17
 // grupo mientras se está escribiendo el número. Por eso el botón "Guardar"
 // vive en la columna de acciones (entre Fecha OC y "← RQ"), no pegado al
 // input. Las filas sin OC todavía quedan juntas en "Sin N° OC", al final.
+//
+// Dentro de cada grupo de OC, si los ítems terminaron con Proveedor
+// distinto (una misma OC en la práctica debería ir a un solo proveedor),
+// se subagrupan por Proveedor con un mini-encabezado liviano — así se nota
+// a simple vista que esa OC mezcla proveedores y conviene revisar si
+// debería separarse. Si todos comparten el mismo proveedor (el caso
+// normal), no se muestra ningún mini-encabezado.
 export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
   const [procesando, setProcesando] = useState(false)
 
@@ -97,6 +104,88 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
 
   const grupos = agruparPorNumero(items, (item) => item.oc_numero, 'Sin N° OC')
 
+  const renderFila = (item: OrdenCompra, banda: boolean) => (
+    <tr key={item.id} className={banda ? 'bg-slate-50/40' : undefined}>
+      <td className="py-2 px-2">{item.solicitado_por}</td>
+      <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
+      <td className="py-2 px-2 text-slate-500">{item.codigo_defontana || '—'}</td>
+      <td className="py-2 px-2">{item.descripcion}</td>
+      <td className="py-2 px-2">{item.marca || '—'}</td>
+      <td className="py-2 px-2">{item.modelo || '—'}</td>
+      <td className="py-2 px-2 text-right">{item.cantidad}</td>
+      <td className="py-2 px-2">{item.unidad || '—'}</td>
+      <td className="py-2 px-2 font-semibold text-slate-900">{item.codigo_sc}</td>
+      <td className="py-2 px-2 text-slate-500">{formatearFechaCorta(item.fecha_solicitud)}</td>
+      <td className="py-2 px-2">
+        {item.documento_url ? (
+          <a href={item.documento_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-xs">
+            Ver
+          </a>
+        ) : (
+          <span className="text-slate-300 text-xs">—</span>
+        )}
+      </td>
+      <td className="py-2 px-2 text-slate-500">{item.rq_numero || '—'}</td>
+      <td className="py-2 px-2 text-slate-500">{formatearFechaCorta(item.fecha_rq)}</td>
+      <td className="py-2 px-2">
+        <CeldaEditable valor={item.proveedor ?? ''} onGuardar={(v) => onGuardarCampo(item.id, 'proveedor', v)} />
+      </td>
+      <td className="py-2 px-2">
+        <div className="relative">
+          <input
+            type="text"
+            value={valorOCActual(item)}
+            placeholder="por llenar"
+            onChange={(e) => setOcPendiente((prev) => ({ ...prev, [item.id]: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') guardarOC(item)
+            }}
+            disabled={!!guardandoOC[item.id]}
+            className="w-full px-2 py-1 border border-slate-300 rounded-md text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 disabled:bg-slate-50"
+          />
+          {errorOC[item.id] && (
+            <p className="absolute top-full left-0 text-[11px] text-red-600 mt-0.5 whitespace-nowrap">{errorOC[item.id]}</p>
+          )}
+        </div>
+      </td>
+      <td className="py-2 px-2">
+        <CeldaEditable
+          tipo="date"
+          valor={item.fecha_oc ? item.fecha_oc.slice(0, 10) : ''}
+          onGuardar={(v) => onGuardarCampo(item.id, 'fecha_oc', v)}
+        />
+      </td>
+      <td className="py-2 px-2">
+        <div className="flex items-center justify-end gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => guardarOC(item)}
+            disabled={!huboCambioOC(item) || !!guardandoOC[item.id]}
+            className="shrink-0 px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {guardandoOC[item.id] ? '…' : 'Guardar'}
+          </button>
+          <button
+            type="button"
+            onClick={() => devolver(item.id, item.codigo_sc, item.numero_item)}
+            disabled={procesando}
+            className="text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60"
+          >
+            ← RQ
+          </button>
+          <button
+            type="button"
+            onClick={() => eliminar(item.id, item.codigo_sc, item.numero_item)}
+            disabled={procesando}
+            className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
+          >
+            Eliminar
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+
   return (
     <div>
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
@@ -125,6 +214,13 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
           <tbody className="divide-y divide-slate-100">
             {grupos.map((grupo, indiceGrupo) => {
               const banda = indiceGrupo % 2 === 1
+              // Solo tiene sentido subagrupar si el grupo trae más de un
+              // proveedor distinto; si todos comparten uno (o todos están
+              // en blanco), agruparPorProveedor devuelve un único grupo y
+              // se renderiza plano, sin mini-encabezado.
+              const subgrupos = agruparPorProveedor(grupo.filas, (item) => item.proveedor)
+              const hayVariosProveedores = subgrupos.length > 1
+
               return (
                 <Fragment key={grupo.clave}>
                   <tr className={banda ? 'bg-slate-100/70' : 'bg-slate-50/70'}>
@@ -135,99 +231,30 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
                       }`}
                     >
                       {grupo.etiqueta} · {grupo.filas.length} ítem{grupo.filas.length === 1 ? '' : 's'}
+                      {hayVariosProveedores && (
+                        <span className="ml-2 normal-case font-normal text-amber-600">
+                          — con más de un proveedor, revisa si conviene separar esta OC
+                        </span>
+                      )}
                     </td>
                   </tr>
-                  {grupo.filas.map((item) => (
-                    <tr key={item.id} className={banda ? 'bg-slate-50/40' : undefined}>
-                      <td className="py-2 px-2">{item.solicitado_por}</td>
-                      <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
-                      <td className="py-2 px-2 text-slate-500">{item.codigo_defontana || '—'}</td>
-                      <td className="py-2 px-2">{item.descripcion}</td>
-                      <td className="py-2 px-2">{item.marca || '—'}</td>
-                      <td className="py-2 px-2">{item.modelo || '—'}</td>
-                      <td className="py-2 px-2 text-right">{item.cantidad}</td>
-                      <td className="py-2 px-2">{item.unidad || '—'}</td>
-                      <td className="py-2 px-2 font-semibold text-slate-900">{item.codigo_sc}</td>
-                      <td className="py-2 px-2 text-slate-500">{formatearFechaCorta(item.fecha_solicitud)}</td>
-                      <td className="py-2 px-2">
-                        {item.documento_url ? (
-                          <a
-                            href={item.documento_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 hover:underline text-xs"
-                          >
-                            Ver
-                          </a>
-                        ) : (
-                          <span className="text-slate-300 text-xs">—</span>
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-slate-500">{item.rq_numero || '—'}</td>
-                      <td className="py-2 px-2 text-slate-500">{formatearFechaCorta(item.fecha_rq)}</td>
-                      <td className="py-2 px-2">
-                        <CeldaEditable
-                          valor={item.proveedor ?? ''}
-                          onGuardar={(v) => onGuardarCampo(item.id, 'proveedor', v)}
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={valorOCActual(item)}
-                            placeholder="por llenar"
-                            onChange={(e) => setOcPendiente((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') guardarOC(item)
-                            }}
-                            disabled={!!guardandoOC[item.id]}
-                            className="w-full px-2 py-1 border border-slate-300 rounded-md text-sm focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 disabled:bg-slate-50"
-                          />
-                          {errorOC[item.id] && (
-                            <p className="absolute top-full left-0 text-[11px] text-red-600 mt-0.5 whitespace-nowrap">
-                              {errorOC[item.id]}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2 px-2">
-                        <CeldaEditable
-                          tipo="date"
-                          valor={item.fecha_oc ? item.fecha_oc.slice(0, 10) : ''}
-                          onGuardar={(v) => onGuardarCampo(item.id, 'fecha_oc', v)}
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="flex items-center justify-end gap-2 flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => guardarOC(item)}
-                            disabled={!huboCambioOC(item) || !!guardandoOC[item.id]}
-                            className="shrink-0 px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {guardandoOC[item.id] ? '…' : 'Guardar'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => devolver(item.id, item.codigo_sc, item.numero_item)}
-                            disabled={procesando}
-                            className="text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60"
-                          >
-                            ← RQ
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => eliminar(item.id, item.codigo_sc, item.numero_item)}
-                            disabled={procesando}
-                            className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {hayVariosProveedores
+                    ? subgrupos.map((subgrupo, indiceSub) => (
+                        <Fragment key={subgrupo.clave}>
+                          <tr className={banda ? 'bg-slate-100/40' : 'bg-slate-50/40'}>
+                            <td
+                              colSpan={NUM_COLUMNAS}
+                              className={`px-2 py-0.5 pl-6 text-[10px] font-semibold text-slate-400 uppercase tracking-wide ${
+                                indiceSub > 0 ? 'border-t border-slate-200' : ''
+                              }`}
+                            >
+                              Proveedor: {subgrupo.etiqueta}
+                            </td>
+                          </tr>
+                          {subgrupo.filas.map((item) => renderFila(item, banda))}
+                        </Fragment>
+                      ))
+                    : grupo.filas.map((item) => renderFila(item, banda))}
                 </Fragment>
               )
             })}
@@ -235,7 +262,9 @@ export const TablaOrdenesCompra = ({ items, cargando, onDevolver, onGuardarCampo
         </table>
       </div>
       <p className="text-xs text-slate-500 mt-2">
-        Proveedor y Fecha OC se guardan solos al salir del campo. El número de OC necesita presionar "Guardar" (o Enter).
+        Proveedor y Fecha OC se guardan solos al salir del campo. El número de OC necesita presionar "Guardar" (o Enter). Si
+        una misma OC termina con ítems de más de un proveedor, se subagrupan y se avisa — no se bloquea el guardado, queda a
+        criterio de quien gestiona la compra si conviene separarla en OCs distintas.
       </p>
     </div>
   )

@@ -10,6 +10,7 @@
     "lint": "eslint src --ext ts,tsx",
     "reset-password": "node scripts/restablecer-clave.mjs",
     "procesar-reportes-existentes": "tsx scripts/procesarReportesExistentes.ts",
+    "verificar-bodega": "node supabase/tests/verificar-bodega.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -33,6 +34,7 @@
     "zustand": "^4.4.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^20.8.0",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18.2.37",

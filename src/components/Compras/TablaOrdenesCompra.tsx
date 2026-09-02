@@ -35,15 +35,20 @@ const NUM_COLUMNAS = 18
 // a simple vista que esa OC mezcla proveedores y conviene revisar si
 // debería separarse. Si todos comparten el mismo proveedor (el caso
 // normal), no se muestra ningún mini-encabezado.
-// Columnas fijas al desplazar horizontalmente — mismo bloque y mismos
-// offsets que TablaRequisiciones.tsx (los anchos w-8/w-32/w-10/w-28 son
-// idénticos). Ver el comentario junto a STICKY en ese archivo para el porqué
-// del fondo opaco explícito en vez de heredado del <tr>.
+// Columnas fijas al desplazar horizontalmente: Checkbox, Solicitado por, N°,
+// Código Defontana y también Descripción (a diferencia de RQ, que la deja
+// scrolleable). Los primeros cuatro offsets son los mismos que en
+// TablaRequisiciones.tsx (anchos w-8/w-32/w-10/w-28 idénticos); Descripción
+// no tenía ancho fijo antes (crecía con el contenido) — una celda sticky no
+// puede depender de "lo que ocupe el contenido", así que gana w-64. Ver el
+// comentario junto a STICKY en TablaRequisiciones.tsx para el porqué del
+// fondo opaco explícito en vez de heredado del <tr>.
 const STICKY = 'sticky z-10'
 const IZQ_CHECKBOX = 'left-0'
 const IZQ_SOLICITADO = 'left-[32px]'
 const IZQ_NUMERO = 'left-[160px]'
-const IZQ_DEFONTANA = 'left-[200px] border-r-2 border-slate-300'
+const IZQ_DEFONTANA = 'left-[200px]'
+const IZQ_DESCRIPCION = 'left-[312px] border-r-2 border-slate-300'
 
 export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
@@ -178,7 +183,7 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
       <td className={`py-2 px-2 text-slate-500 ${STICKY} ${IZQ_DEFONTANA} ${claseFondoSticky}`}>
         {item.codigo_defontana || '—'}
       </td>
-      <td className="py-2 px-2">{item.descripcion}</td>
+      <td className={`py-2 px-2 w-64 ${STICKY} ${IZQ_DESCRIPCION} ${claseFondoSticky}`}>{item.descripcion}</td>
       <td className="py-2 px-2">{item.marca || '—'}</td>
       <td className="py-2 px-2">{item.modelo || '—'}</td>
       <td className="py-2 px-2 text-right">{item.cantidad}</td>
@@ -297,7 +302,7 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
               <th className={`text-left py-2 px-2 w-32 bg-slate-50 ${STICKY} ${IZQ_SOLICITADO}`}>Solicitado por</th>
               <th className={`text-left py-2 px-2 w-10 bg-slate-50 ${STICKY} ${IZQ_NUMERO}`}>N°</th>
               <th className={`text-left py-2 px-2 w-28 bg-slate-50 ${STICKY} ${IZQ_DEFONTANA}`}>Código Defontana</th>
-              <th className="text-left py-2 px-2">Descripción</th>
+              <th className={`text-left py-2 px-2 w-64 bg-slate-50 ${STICKY} ${IZQ_DESCRIPCION}`}>Descripción</th>
               <th className="text-left py-2 px-2 w-24">Marca</th>
               <th className="text-left py-2 px-2 w-24">Modelo</th>
               <th className="text-right py-2 px-2 w-20">Cantidad</th>
@@ -367,7 +372,7 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
         Proveedor y Fecha OC se guardan solos al salir del campo. El número de OC necesita presionar "Guardar" (o Enter). Si
         una misma OC termina con ítems de más de un proveedor, se subagrupan y se avisa — no se bloquea el guardado, queda a
         criterio de quien gestiona la compra si conviene separarla en OCs distintas.
-        Solicitado por, N°, Código Defontana y el checkbox quedan fijos al desplazar horizontalmente.
+        Solicitado por, N°, Código Defontana, Descripción y el checkbox quedan fijos al desplazar horizontalmente.
       </p>
     </div>
   )

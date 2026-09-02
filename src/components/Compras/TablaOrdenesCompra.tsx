@@ -35,6 +35,16 @@ const NUM_COLUMNAS = 18
 // a simple vista que esa OC mezcla proveedores y conviene revisar si
 // debería separarse. Si todos comparten el mismo proveedor (el caso
 // normal), no se muestra ningún mini-encabezado.
+// Columnas fijas al desplazar horizontalmente — mismo bloque y mismos
+// offsets que TablaRequisiciones.tsx (los anchos w-8/w-32/w-10/w-28 son
+// idénticos). Ver el comentario junto a STICKY en ese archivo para el porqué
+// del fondo opaco explícito en vez de heredado del <tr>.
+const STICKY = 'sticky z-10'
+const IZQ_CHECKBOX = 'left-0'
+const IZQ_SOLICITADO = 'left-[32px]'
+const IZQ_NUMERO = 'left-[160px]'
+const IZQ_DEFONTANA = 'left-[200px] border-r-2 border-slate-300'
+
 export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaOrdenesCompraProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [procesando, setProcesando] = useState(false)
@@ -146,9 +156,14 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
 
   const grupos = agruparPorNumero(items, (item) => item.oc_numero, 'Sin N° OC')
 
-  const renderFila = (item: OrdenCompra, banda: boolean) => (
-    <tr key={item.id} className={seleccion.has(item.id) ? 'bg-blue-50/50' : banda ? 'bg-slate-50/40' : undefined}>
-      <td className="py-2 px-2">
+  const renderFila = (item: OrdenCompra, banda: boolean) => {
+    const claseFondo = seleccion.has(item.id) ? 'bg-blue-50/50' : banda ? 'bg-slate-50/40' : undefined
+    // Mismo color que `claseFondo`, sin transparencia — ver comentario junto
+    // a STICKY más arriba.
+    const claseFondoSticky = seleccion.has(item.id) ? 'bg-blue-50' : banda ? 'bg-slate-50' : 'bg-white'
+    return (
+    <tr key={item.id} className={claseFondo}>
+      <td className={`py-2 px-2 ${STICKY} ${IZQ_CHECKBOX} ${claseFondoSticky}`}>
         <input
           type="checkbox"
           aria-label={`Seleccionar ${item.codigo_sc} ítem ${item.numero_item}`}
@@ -156,9 +171,13 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
           onChange={() => alternarFila(item.id)}
         />
       </td>
-      <td className="py-2 px-2">{item.solicitado_por}</td>
-      <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
-      <td className="py-2 px-2 text-slate-500">{item.codigo_defontana || '—'}</td>
+      <td className={`py-2 px-2 ${STICKY} ${IZQ_SOLICITADO} ${claseFondoSticky}`}>{item.solicitado_por}</td>
+      <td className={`py-2 px-2 text-slate-400 font-mono text-xs ${STICKY} ${IZQ_NUMERO} ${claseFondoSticky}`}>
+        {item.numero_item}
+      </td>
+      <td className={`py-2 px-2 text-slate-500 ${STICKY} ${IZQ_DEFONTANA} ${claseFondoSticky}`}>
+        {item.codigo_defontana || '—'}
+      </td>
       <td className="py-2 px-2">{item.descripcion}</td>
       <td className="py-2 px-2">{item.marca || '—'}</td>
       <td className="py-2 px-2">{item.modelo || '—'}</td>
@@ -242,7 +261,8 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
         </div>
       </td>
     </tr>
-  )
+    )
+  }
 
   return (
     <div>
@@ -266,7 +286,7 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
         <table className="w-full text-sm min-w-[2600px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
-              <th className="py-2 px-2 w-8">
+              <th className={`py-2 px-2 w-8 bg-slate-50 ${STICKY} ${IZQ_CHECKBOX}`}>
                 <input
                   type="checkbox"
                   aria-label="Seleccionar todas"
@@ -274,9 +294,9 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
                   onChange={alternarTodas}
                 />
               </th>
-              <th className="text-left py-2 px-2 w-32">Solicitado por</th>
-              <th className="text-left py-2 px-2 w-10">N°</th>
-              <th className="text-left py-2 px-2 w-28">Código Defontana</th>
+              <th className={`text-left py-2 px-2 w-32 bg-slate-50 ${STICKY} ${IZQ_SOLICITADO}`}>Solicitado por</th>
+              <th className={`text-left py-2 px-2 w-10 bg-slate-50 ${STICKY} ${IZQ_NUMERO}`}>N°</th>
+              <th className={`text-left py-2 px-2 w-28 bg-slate-50 ${STICKY} ${IZQ_DEFONTANA}`}>Código Defontana</th>
               <th className="text-left py-2 px-2">Descripción</th>
               <th className="text-left py-2 px-2 w-24">Marca</th>
               <th className="text-left py-2 px-2 w-24">Modelo</th>
@@ -347,6 +367,7 @@ export const TablaOrdenesCompra = ({ items, cargando, busqueda, onAvanzar, onDev
         Proveedor y Fecha OC se guardan solos al salir del campo. El número de OC necesita presionar "Guardar" (o Enter). Si
         una misma OC termina con ítems de más de un proveedor, se subagrupan y se avisa — no se bloquea el guardado, queda a
         criterio de quien gestiona la compra si conviene separarla en OCs distintas.
+        Solicitado por, N°, Código Defontana y el checkbox quedan fijos al desplazar horizontalmente.
       </p>
     </div>
   )

@@ -31,6 +31,20 @@ const NUM_COLUMNAS = 15
 // columna de acciones (entre Fecha RQ y los botones de avance/devolución),
 // no pegado al input. Las filas sin RQ todavía quedan en su propio grupo,
 // "Sin N° RQ", al final.
+// Columnas fijas al desplazar horizontalmente: Checkbox, Solicitado por,
+// N° y Código Defontana — el mismo bloque de identificación que se fija
+// también en OC y Guías de Despacho. `left-[Npx]` es la suma acumulada de
+// los anchos fijos (w-8/w-32/w-10) de las columnas anteriores; si esos
+// anchos cambian, estos offsets hay que recalcularlos a mano. El fondo va
+// explícito (no heredado del <tr>, que puede ser translúcido) porque una
+// celda `sticky` sin fondo opaco deja ver el contenido de las columnas que
+// pasan por debajo al desplazar.
+const STICKY = 'sticky z-10'
+const IZQ_CHECKBOX = 'left-0'
+const IZQ_SOLICITADO = 'left-[32px]'
+const IZQ_NUMERO = 'left-[160px]'
+const IZQ_DEFONTANA = 'left-[200px] border-r-2 border-slate-300'
+
 export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDevolver, onGuardarCampo, onEliminar }: TablaRequisicionesProps) => {
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
   const [procesando, setProcesando] = useState(false)
@@ -165,7 +179,7 @@ export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDev
         <table className="w-full text-sm min-w-[1750px]">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
-              <th className="py-2 px-2 w-8">
+              <th className={`py-2 px-2 w-8 bg-slate-50 ${STICKY} ${IZQ_CHECKBOX}`}>
                 <input
                   type="checkbox"
                   aria-label="Seleccionar todas"
@@ -173,9 +187,9 @@ export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDev
                   onChange={alternarTodas}
                 />
               </th>
-              <th className="text-left py-2 px-2 w-32">Solicitado por</th>
-              <th className="text-left py-2 px-2 w-10">N°</th>
-              <th className="text-left py-2 px-2 w-28">Código Defontana</th>
+              <th className={`text-left py-2 px-2 w-32 bg-slate-50 ${STICKY} ${IZQ_SOLICITADO}`}>Solicitado por</th>
+              <th className={`text-left py-2 px-2 w-10 bg-slate-50 ${STICKY} ${IZQ_NUMERO}`}>N°</th>
+              <th className={`text-left py-2 px-2 w-28 bg-slate-50 ${STICKY} ${IZQ_DEFONTANA}`}>Código Defontana</th>
               <th className="text-left py-2 px-2">Descripción</th>
               <th className="text-left py-2 px-2 w-24">Marca</th>
               <th className="text-left py-2 px-2 w-24">Modelo</th>
@@ -204,9 +218,15 @@ export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDev
                       {grupo.etiqueta} · {grupo.filas.length} ítem{grupo.filas.length === 1 ? '' : 's'}
                     </td>
                   </tr>
-                  {grupo.filas.map((item) => (
-                    <tr key={item.id} className={seleccion.has(item.id) ? 'bg-blue-50/50' : banda ? 'bg-slate-50/40' : undefined}>
-                      <td className="py-2 px-2">
+                  {grupo.filas.map((item) => {
+                    const claseFondo = seleccion.has(item.id) ? 'bg-blue-50/50' : banda ? 'bg-slate-50/40' : undefined
+                    // Mismo color que `claseFondo`, pero sin transparencia:
+                    // las celdas sticky necesitan un fondo opaco propio (ver
+                    // comentario junto a STICKY más arriba).
+                    const claseFondoSticky = seleccion.has(item.id) ? 'bg-blue-50' : banda ? 'bg-slate-50' : 'bg-white'
+                    return (
+                    <tr key={item.id} className={claseFondo}>
+                      <td className={`py-2 px-2 ${STICKY} ${IZQ_CHECKBOX} ${claseFondoSticky}`}>
                         <input
                           type="checkbox"
                           aria-label={`Seleccionar ${item.codigo_sc} ítem ${item.numero_item}`}
@@ -214,9 +234,11 @@ export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDev
                           onChange={() => alternarFila(item.id)}
                         />
                       </td>
-                      <td className="py-2 px-2">{item.solicitado_por}</td>
-                      <td className="py-2 px-2 text-slate-400 font-mono text-xs">{item.numero_item}</td>
-                      <td className="py-2 px-2">
+                      <td className={`py-2 px-2 ${STICKY} ${IZQ_SOLICITADO} ${claseFondoSticky}`}>{item.solicitado_por}</td>
+                      <td className={`py-2 px-2 text-slate-400 font-mono text-xs ${STICKY} ${IZQ_NUMERO} ${claseFondoSticky}`}>
+                        {item.numero_item}
+                      </td>
+                      <td className={`py-2 px-2 ${STICKY} ${IZQ_DEFONTANA} ${claseFondoSticky}`}>
                         <CeldaEditable
                           valor={item.codigo_defontana ?? ''}
                           onGuardar={(v) => onGuardarCampo(item.id, 'codigo_defontana', v)}
@@ -307,7 +329,8 @@ export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDev
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </Fragment>
               )
             })}
@@ -316,6 +339,7 @@ export const TablaRequisiciones = ({ items, cargando, busqueda, onAvanzar, onDev
       </div>
       <p className="text-xs text-slate-500 mt-2">
         Código Defontana y Fecha RQ se guardan solas al salir del campo. El número de RQ necesita presionar "Guardar" (o Enter) — así la fila no cambia de grupo mientras se está escribiendo el número.
+        Solicitado por, N°, Código Defontana y el checkbox quedan fijos al desplazar horizontalmente.
       </p>
     </div>
   )

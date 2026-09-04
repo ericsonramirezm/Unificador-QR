@@ -334,7 +334,7 @@ export const CARGOS_INDIRECTOS = [
 ] as const;
 
 export const EQUIPOS_MAQUINARIA = [
-  'Camión Tolva 20 m3', 'Camión Aljibe', 'Excavadora 30 ton', 'Retroexcavadora',
+  'Camioneta Mitsubishi L-200', 'Camión Aljibe', 'Excavadora 30 ton', 'Retroexcavadora',
   'Mini Excavadora', 'Martillo Excavadora', 'Rodillo Compactador 10Ton',
   'Rodillo Compactador Manual', 'Tijera Eléctrica h=5mt', 'Camión Pluma',
   'Camión Rampla', 'Grúa 90 ton.', 'Alza Hombre 15 mt', 'Grupo Electrógeno 20kva',

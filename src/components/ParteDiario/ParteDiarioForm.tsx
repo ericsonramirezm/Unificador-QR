@@ -18,6 +18,7 @@ import { DailyReportExcelPreview } from './DailyReportExcelPreview'
 import { traducirError } from '@lib/errores'
 import { useAutoguardado, leerBorrador, haceCuanto } from '@hooks/useBorradorLocal'
 import { hhDeFila, hhTotales, permisoDescanso } from '@lib/calculosHH'
+import { HH_DIRECTAS_PROGRAMADO_POR_FECHA } from '@lib/hhProgramadoSchedule'
 
 interface ParteDiarioFormProps {
   usuario: Usuario
@@ -158,6 +159,19 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
   const [hhIndirectasProgramado, setHhIndirectasProgramado] = useState(
     () => parteExistente?.hh_indirectas_programado ?? 0
   )
+
+  // Autocompleta "HH Directas — Programado" según la fecha elegida, con el
+  // cronograma del contrato (HH_DIRECTAS_PROGRAMADO_POR_FECHA). Solo al
+  // crear un reporte nuevo (no editando uno existente, para no pisar un
+  // valor ya guardado/corregido a mano) — y solo autocompleta, el campo
+  // sigue siendo un input editable normal: si la persona lo corrige a
+  // mano después de esto, su valor queda tal cual hasta que vuelva a
+  // cambiar la fecha.
+  useEffect(() => {
+    if (editando) return
+    setHhDirectasProgramado(HH_DIRECTAS_PROGRAMADO_POR_FECHA[fecha] ?? 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fecha, editando])
 
   const [comentarioContratistaAutor, setComentarioContratistaAutor] = useState(
     () => parteExistente?.comentario_contratista_autor ?? usuario.nombre

@@ -1,10 +1,28 @@
 import { useEffect, useState } from 'react'
 import { db } from '@lib/supabase'
-import { Faena, FAENA_LABELS, ParteDiario, ParteDiarioEstado, Usuario } from '@/types/index'
+import { Faena, FAENA_LABELS, HH_TURNO_POR_FAENA, ParteDiario, ParteDiarioEstado, Usuario } from '@/types/index'
 import { ParteDiarioForm } from './ParteDiarioForm'
 import { ParteDiarioDetalle } from './ParteDiarioDetalle'
 import { puedeCrear, puedeEditar, puedeEliminar } from './permisos'
 import { traducirError } from '@lib/errores'
+
+// HH del reporte propiamente tal (no acumuladas) — mismo cálculo que ya
+// usan ParteDiarioDetalle.tsx y DailyReportExcelPreview.tsx: Directas/
+// Maquinaria suman las horas por actividad ya cargadas; Indirectas no se
+// registran por actividad, se derivan de operativos × HH de turno de esa
+// faena (ver HH_TURNO_POR_FAENA).
+const sumarHoras = (items: any[], campo: string) =>
+  items.reduce((acc, item) => acc + (Array.isArray(item[campo]) ? item[campo].reduce((a: number, h: number) => a + (h || 0), 0) : 0), 0)
+
+const calcularHH = (parte: ParteDiario) => {
+  const directas = sumarHoras(parte.mano_obra_directa, 'horas_por_actividad')
+  const maquinaria = sumarHoras(parte.maquinaria, 'horas_por_actividad')
+  const indirectas = parte.mano_obra_indirecta.reduce(
+    (acc, f) => acc + HH_TURNO_POR_FAENA[parte.faena] * (f.operativos || 0),
+    0
+  )
+  return { directas, maquinaria, indirectas, total: directas + maquinaria + indirectas }
+}
 
 interface ParteDiarioListProps {
   usuario: Usuario
@@ -209,12 +227,18 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                 <th className="text-left px-4 py-3">Faena</th>
                 <th className="text-left px-4 py-3">Fecha</th>
                 <th className="text-left px-4 py-3">Creado por</th>
+                <th className="text-right px-4 py-3">HH Directas</th>
+                <th className="text-right px-4 py-3">HH Maquinaria</th>
+                <th className="text-right px-4 py-3">HH Indirectas</th>
+                <th className="text-right px-4 py-3">HH Total</th>
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-right px-4 py-3">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {partes.map((parte) => (
+              {partes.map((parte) => {
+                const hh = calcularHH(parte)
+                return (
                 <tr
                   key={parte.id}
                   onClick={() => setParteSeleccionado(parte.id)}
@@ -233,6 +257,10 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                   </td>
                   <td className="px-4 py-3 text-slate-700">{parte.fecha}</td>
                   <td className="px-4 py-3 text-slate-700">{parte.usuario_creador?.nombre ?? '—'}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.directas}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.maquinaria}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.indirectas}</td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold text-slate-900">{hh.total}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${COLOR_ESTADO[parte.estado]}`}>
                       {ETIQUETA_ESTADO[parte.estado]}
@@ -267,7 +295,8 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         )}

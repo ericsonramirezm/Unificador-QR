@@ -227,6 +227,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                 <th className="text-left px-4 py-3">Faena</th>
                 <th className="text-left px-4 py-3">Fecha</th>
                 <th className="text-left px-4 py-3">Creado por</th>
+                <th className="text-right px-4 py-3">HH Directas — Programado</th>
                 <th className="text-right px-4 py-3">HH Directas</th>
                 <th className="text-right px-4 py-3">HH Maquinaria</th>
                 <th className="text-right px-4 py-3">HH Indirectas</th>
@@ -257,6 +258,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                   </td>
                   <td className="px-4 py-3 text-slate-700">{parte.fecha}</td>
                   <td className="px-4 py-3 text-slate-700">{parte.usuario_creador?.nombre ?? '—'}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-500">{parte.hh_directas_programado ?? 0}</td>
                   <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.directas}</td>
                   <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.maquinaria}</td>
                   <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.indirectas}</td>

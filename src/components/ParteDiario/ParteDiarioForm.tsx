@@ -97,12 +97,13 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
   // reporte ya guardado quedaría con datos de una faena pero acumulados
   // de la cadena de otra.
   const [faena, setFaena] = useState<Faena>(() => parteExistente?.faena ?? Faena.LT)
-  // Controla la ventana obligatoria de selección de faena al crear un
-  // reporte nuevo: arranca sin elegir (false) solo cuando !editando: el
-  // formulario completo queda tapado por la ventana hasta que el usuario
-  // toca "Las Tórtolas" o "Los Bronces" — no hay forma de cerrarla sin
-  // elegir (pedido explícito, ver conversación). Al editar, ya está
-  // "elegida" de entrada porque la faena viene fija desde parteExistente.
+  // Controla las dos ventanas obligatorias al crear un reporte nuevo:
+  // primero fecha, después faena (pedido explícito) — el formulario
+  // completo queda tapado hasta que ambas estén elegidas, sin forma de
+  // cerrarlas antes. Arrancan sin elegir (false) solo cuando !editando; al
+  // editar, ya vienen "elegidas" de entrada porque fecha y faena vienen
+  // fijas desde parteExistente.
+  const [fechaElegida, setFechaElegida] = useState<boolean>(editando)
   const [faenaElegida, setFaenaElegida] = useState<boolean>(editando)
   const [actividades, setActividades] = useState<ActividadEjecutada[]>(() =>
     parteExistente && parteExistente.actividades.length > 0
@@ -241,6 +242,7 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
     if (!borradorDisponible) return
     const d = borradorDisponible.datos
     setFecha(d.fecha)
+    setFechaElegida(true)
     setCondicionClimatica(d.condicionClimatica)
     setFaena(d.faena)
     setFaenaElegida(true)
@@ -560,13 +562,47 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-8">
-      {/* Ventana obligatoria de faena: solo al crear (no editando) y solo
-          hasta que se elija. No se puede cerrar sin elegir — sin botón de
-          cerrar, sin Dialog.Close, e ignorando Esc/click afuera. El resto
-          del formulario igual se renderiza detrás (el overlay bloquea la
-          interacción), así que el N° de reporte ya está listo apenas se
-          cierra la ventana. */}
-      {!editando && !faenaElegida && (
+      {/* Dos ventanas obligatorias al crear (no editando), en secuencia:
+          primero fecha, después faena — ninguna se puede cerrar sin elegir
+          (sin botón de cerrar, sin Dialog.Close, ignorando Esc/click
+          afuera). El resto del formulario igual se renderiza detrás (el
+          overlay bloquea la interacción), así que el N° de reporte ya está
+          listo apenas se cierran ambas ventanas. */}
+      {!editando && !fechaElegida && (
+        <Dialog.Root open onOpenChange={() => {}}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 bg-black/50 z-40" />
+            <Dialog.Content
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-white rounded-lg shadow-xl z-50 p-6"
+              onEscapeKeyDown={(e) => e.preventDefault()}
+              onInteractOutside={(e) => e.preventDefault()}
+            >
+              <Dialog.Title className="text-lg font-bold text-slate-900 mb-1">
+                ¿Qué fecha tiene este Daily Report?
+              </Dialog.Title>
+              <Dialog.Description className="text-sm text-slate-500 mb-4">
+                Confirma o cambia la fecha para continuar.
+              </Dialog.Description>
+              <input
+                type="date"
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+                className={`${inputClase} mb-4`}
+              />
+              <button
+                type="button"
+                disabled={!fecha}
+                onClick={() => setFechaElegida(true)}
+                className="w-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Continuar
+              </button>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+
+      {!editando && fechaElegida && !faenaElegida && (
         <Dialog.Root open onOpenChange={() => {}}>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 bg-black/50 z-40" />

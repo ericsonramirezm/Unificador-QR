@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
-import { UserRole, SolicitudCompra, Requisicion, OrdenCompra, GuiaDespacho } from '@/types/index'
+import { UserRole, SolicitudCompra, Requisicion, OrdenCompra, GuiaDespacho, Faena } from '@/types/index'
+import { acumularCadena, calcularHHReales } from './calculosHH'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -444,6 +445,59 @@ export const db = {
 
     if (error) throw error
     return data
+  },
+
+  // Recalcula la cadena de *_acumuladas de una faena DESDE CERO, a partir
+  // del HH real de cada reporte (calcularHHReales), y guarda solo los
+  // reportes cuyo acumulado haya quedado distinto del que ya tenían.
+  //
+  // Por qué existe: antes, el acumulado de un reporte nuevo se calculaba
+  // una sola vez al crearlo (último acumulado + HH de este reporte) y
+  // quedaba fijo para siempre — si ese reporte (o cualquier reporte
+  // anterior de la misma faena) se editaba después, ese cambio nunca se
+  // reflejaba ni en su propio acumulado ni en el de los reportes
+  // posteriores, que dependen de él en cadena. Auditoría del 2026-09-07
+  // encontró 5 reportes reales desincronizados así, con hasta 141 HH de
+  // diferencia entre lo mostrado y la suma real. Este método reemplaza ese
+  // cálculo incremental: se llama después de CUALQUIER guardado (crear,
+  // editar, o el reintento de crearParteDiario/actualizarParteDiario) y
+  // siempre recalcula la cadena completa, así que un reporte editado
+  // propaga el cambio a todo lo que viene después automáticamente. Ver
+  // ParteDiarioForm.tsx (guardar()) y calculosHH.ts (acumularCadena).
+  async recalcularAcumuladosFaena(contratoId: string, faena: Faena) {
+    const { data, error } = await supabase
+      .from('partes_diarios')
+      .select('id, mano_obra_directa, mano_obra_indirecta, maquinaria, hh_directas_acumuladas, hm_acumuladas, hh_indirectas_acumuladas')
+      .eq('contrato_id', contratoId)
+      .eq('faena', faena)
+      .order('numero_reporte', { ascending: true })
+
+    if (error) throw error
+    if (!data || data.length === 0) return
+
+    const reales = data.map((p) => calcularHHReales(p, faena))
+    const cadena = acumularCadena(reales)
+
+    for (let i = 0; i < data.length; i++) {
+      const p = data[i]
+      const acc = cadena[i]
+      const sinCambios =
+        (p.hh_directas_acumuladas ?? 0) === acc.directas &&
+        (p.hm_acumuladas ?? 0) === acc.hm &&
+        (p.hh_indirectas_acumuladas ?? 0) === acc.indirectas
+      if (sinCambios) continue
+
+      const { error: errorUpdate } = await supabase
+        .from('partes_diarios')
+        .update({
+          hh_directas_acumuladas: acc.directas,
+          hm_acumuladas: acc.hm,
+          hh_indirectas_acumuladas: acc.indirectas,
+        })
+        .eq('id', p.id)
+
+      if (errorUpdate) throw errorUpdate
+    }
   },
 
   async crearParteDiario(parte: any) {

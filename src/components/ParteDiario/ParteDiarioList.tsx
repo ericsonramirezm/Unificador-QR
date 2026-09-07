@@ -232,6 +232,7 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                 <th className="text-right px-4 py-3">HH Maquinaria</th>
                 <th className="text-right px-4 py-3">HH Indirectas</th>
                 <th className="text-right px-4 py-3">HH Total</th>
+                <th className="text-right px-4 py-3">HH Acumulado</th>
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-right px-4 py-3">Acciones</th>
               </tr>
@@ -263,6 +264,9 @@ export const ParteDiarioList = ({ usuario, contrato }: ParteDiarioListProps) => 
                   <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.maquinaria}</td>
                   <td className="px-4 py-3 text-right font-mono text-slate-900">{hh.indirectas}</td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-slate-900">{hh.total}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-500">
+                    {(parte.hh_directas_acumuladas ?? 0) + (parte.hm_acumuladas ?? 0) + (parte.hh_indirectas_acumuladas ?? 0)}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${COLOR_ESTADO[parte.estado]}`}>
                       {ETIQUETA_ESTADO[parte.estado]}

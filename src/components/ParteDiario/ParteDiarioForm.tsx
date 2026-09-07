@@ -421,26 +421,27 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
           estado: estadoFinal,
         })
       } else if (editando && parteExistente) {
-        // Al editar NO se tocan las columnas *_acumuladas: recalcularlas
-        // implicaría además recalcular en cascada todos los reportes
-        // posteriores a este (que heredan el acumulado), lo cual queda
-        // fuera de alcance acá. Tampoco se pisa el estado si el reporte ya
-        // fue enviado o comentado por el mandante (ver estadoBloqueado).
+        // Tampoco se pisa el estado si el reporte ya fue enviado o
+        // comentado por el mandante (ver estadoBloqueado).
         const updates: Record<string, unknown> = { ...camposComunes }
         if (!estadoBloqueado) {
           updates.estado = estadoFinal
         }
         parte = await db.actualizarParteDiario(parteExistente.id, updates)
       } else {
-        const ultimoParte = await db.obtenerUltimoParteDiario(contrato.id, faena)
+        // hh_*_acumuladas acá es solo un valor inicial razonable (por si
+        // recalcularAcumuladosFaena de abajo llegara a fallar después de
+        // esta inserción) — el recálculo de la cadena completa es el que
+        // deja el valor definitivo, así que no hace falta traer el último
+        // reporte de la faena para sumarle el de este.
         parte = await db.crearParteDiario({
           contrato_id: contrato.id,
           numero_reporte: numeroReporte,
           ...camposComunes,
 
-          hh_directas_acumuladas: (ultimoParte?.hh_directas_acumuladas ?? 0) + totalHhDirectas,
-          hm_acumuladas: (ultimoParte?.hm_acumuladas ?? 0) + totalHm,
-          hh_indirectas_acumuladas: (ultimoParte?.hh_indirectas_acumuladas ?? 0) + totalHhIndirectas,
+          hh_directas_acumuladas: totalHhDirectas,
+          hm_acumuladas: totalHm,
+          hh_indirectas_acumuladas: totalHhIndirectas,
 
           fotos: [],
 
@@ -451,6 +452,16 @@ export const ParteDiarioForm = ({ usuario, contrato, parteExistente, onGuardado,
         // debe reintentarse como actualización, nunca como inserción nueva.
         setParteCreadoId(parte.id)
       }
+
+      // Recalcula la cadena de acumulados de la faena DESDE CERO, a partir
+      // del HH real de cada reporte guardado — no solo "el último + este".
+      // Se llama después de las tres ramas de arriba (crear, reintento de
+      // creación, y editar uno existente) para que un reporte editado
+      // propague el cambio a todos los reportes posteriores de la cadena.
+      // Antes esto no pasaba: la auditoría del 2026-09-07 encontró 5
+      // reportes reales con acumulados desincronizados, hasta 141 HH de
+      // diferencia con la suma real. Ver db.recalcularAcumuladosFaena.
+      await db.recalcularAcumuladosFaena(contrato.id, faena)
 
       // Fotos: unifica las nuevas (traen "file", hay que subirlas a Storage)
       // con las ya existentes (traen "url", vienen de editar un Daily

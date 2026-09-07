@@ -56,3 +56,60 @@ export function horasPorActividad(operativos: number, duracionesActividad: (numb
 export function acumular(anterior: number | null | undefined, delTurno: number): number {
   return (anterior ?? 0) + delTurno
 }
+
+export interface HHReporte {
+  directas: number
+  hm: number
+  indirectas: number
+}
+
+interface FilaConHoras {
+  horas_por_actividad?: (number | null)[] | null
+}
+
+/**
+ * HH reales de un reporte YA GUARDADO (no acumuladas, no programadas) —
+ * misma fórmula que usan DailyReportExcelPreview.tsx, ParteDiarioDetalle.tsx
+ * y ParteDiarioList.tsx para "hoy": suma de horas por actividad para
+ * Directas y Maquinaria (ya quedaron fijadas al guardar el reporte, ver
+ * calcularHorasCargo en ParteDiarioForm.tsx), operativos x HH de turno de
+ * la faena para Indirectas (que no se registran por actividad).
+ *
+ * Única fuente de verdad para "cuánta HH tiene realmente este reporte" —
+ * usada tanto para recalcular la cadena de acumulados (acumularCadena) como
+ * para poder auditarla contra lo que quedó guardado en *_acumuladas.
+ */
+export function calcularHHReales(
+  parte: { mano_obra_directa: FilaConHoras[]; maquinaria: FilaConHoras[]; mano_obra_indirecta: FilaCargo[] },
+  faena: Faena
+): HHReporte {
+  const sumarHorasPorActividad = (filas: FilaConHoras[]) =>
+    sumar(filas.flatMap((f) => (f.horas_por_actividad ?? []).map((h) => h ?? 0)))
+
+  return {
+    directas: sumarHorasPorActividad(parte.mano_obra_directa),
+    hm: sumarHorasPorActividad(parte.maquinaria),
+    indirectas: hhTotales(faena, parte.mano_obra_indirecta),
+  }
+}
+
+/**
+ * Recalcula la cadena de acumulados de una faena DESDE CERO, en el mismo
+ * orden que reciba `reportesEnOrden` (debe venir ordenado por número de
+ * reporte ascendente). Usa `acumular()` en cada paso, así que si el HH real
+ * de un reporte de en medio cambió (se editó después de creado), el cambio
+ * se propaga a todos los reportes posteriores de la cadena — a diferencia
+ * de calcular solo "anterior + este", que deja fijo cualquier reporte
+ * posterior al que se editó.
+ */
+export function acumularCadena(reportesEnOrden: HHReporte[]): HHReporte[] {
+  let directas = 0
+  let hm = 0
+  let indirectas = 0
+  return reportesEnOrden.map((r) => {
+    directas = acumular(directas, r.directas)
+    hm = acumular(hm, r.hm)
+    indirectas = acumular(indirectas, r.indirectas)
+    return { directas, hm, indirectas }
+  })
+}

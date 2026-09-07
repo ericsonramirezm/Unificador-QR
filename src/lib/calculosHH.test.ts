@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { Faena, HH_TURNO_POR_FAENA } from '@/types/index'
-import { acumular, hhDeFila, hhTotales, horasPorActividad, permisoDescanso, sumar } from './calculosHH'
+import {
+  acumular,
+  acumularCadena,
+  calcularHHReales,
+  hhDeFila,
+  hhTotales,
+  horasPorActividad,
+  permisoDescanso,
+  sumar,
+} from './calculosHH'
 import { traducirError } from './errores'
 
 describe('multiplicador de HH por faena', () => {
@@ -69,6 +78,72 @@ describe('acumulados', () => {
 
   it('suma sobre el acumulado del reporte anterior', () => {
     expect(acumular(1000, 120)).toBe(1120)
+  })
+})
+
+describe('HH reales de un reporte guardado', () => {
+  it('suma horas por actividad en Directas y Maquinaria, operativos x turno en Indirectas', () => {
+    const parte = {
+      mano_obra_directa: [{ horas_por_actividad: [10, 20] }, { horas_por_actividad: [5] }],
+      maquinaria: [{ horas_por_actividad: [4, 4] }],
+      mano_obra_indirecta: [{ contratados: 3, operativos: 2 }],
+    }
+    expect(calcularHHReales(parte, Faena.LT)).toEqual({ directas: 35, hm: 8, indirectas: 20 })
+    expect(calcularHHReales(parte, Faena.LB)).toEqual({ directas: 35, hm: 8, indirectas: 24 })
+  })
+
+  it('filas sin horas_por_actividad (null/undefined) no rompen la suma', () => {
+    const parte = {
+      mano_obra_directa: [{ horas_por_actividad: null }, { horas_por_actividad: undefined }],
+      maquinaria: [],
+      mano_obra_indirecta: [],
+    }
+    expect(calcularHHReales(parte, Faena.LT)).toEqual({ directas: 0, hm: 0, indirectas: 0 })
+  })
+})
+
+describe('cadena de acumulados de una faena', () => {
+  it('el primer reporte parte de cero', () => {
+    expect(acumularCadena([{ directas: 100, hm: 0, indirectas: 50 }])).toEqual([
+      { directas: 100, hm: 0, indirectas: 50 },
+    ])
+  })
+
+  it('cada reporte suma sobre el acumulado del anterior', () => {
+    const cadena = acumularCadena([
+      { directas: 100, hm: 0, indirectas: 50 },
+      { directas: 80, hm: 10, indirectas: 40 },
+      { directas: 60, hm: 0, indirectas: 30 },
+    ])
+    expect(cadena).toEqual([
+      { directas: 100, hm: 0, indirectas: 50 },
+      { directas: 180, hm: 10, indirectas: 90 },
+      { directas: 240, hm: 10, indirectas: 120 },
+    ])
+  })
+
+  // Reproduce el bug encontrado en producción (auditoría 2026-09-07): un
+  // reporte de en medio de la cadena se edita después de creado (su HH real
+  // baja de 55 a 50) — el acumulado de ESE reporte y el de TODOS los
+  // posteriores tiene que reflejar el nuevo valor, no quedar pegado al
+  // original. `acumularCadena` recalcula desde cero cada vez, así que esto
+  // sale gratis con tal de pasarle los reportes en orden — es la prueba que
+  // habría atrapado el bug si hubiera existido antes.
+  it('si el HH real de un reporte de en medio cambia, el cambio se propaga a los reportes posteriores', () => {
+    const original = acumularCadena([
+      { directas: 132, hm: 0, indirectas: 55 }, // reporte N°1, antes de editar
+      { directas: 99, hm: 0, indirectas: 70 }, // reporte N°2
+    ])
+    expect(original[1]).toEqual({ directas: 231, hm: 0, indirectas: 125 })
+
+    const trasEditarN1 = acumularCadena([
+      { directas: 132, hm: 0, indirectas: 50 }, // reporte N°1, editado: 55 -> 50
+      { directas: 99, hm: 0, indirectas: 70 }, // reporte N°2, sin cambios
+    ])
+    // El acumulado del N°2 baja en 5, exactamente lo que bajó el N°1 — no
+    // se queda pegado en 125 (que fue el bug real: reportes 1, 2, 3, 18 y
+    // 19 quedaron con acumulados que no reflejaban ediciones posteriores).
+    expect(trasEditarN1[1]).toEqual({ directas: 231, hm: 0, indirectas: 120 })
   })
 })
 

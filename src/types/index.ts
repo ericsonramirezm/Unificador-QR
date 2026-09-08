@@ -317,20 +317,45 @@ export interface ParteDiario {
   usuario_creador?: Usuario;
 }
 
+// ============ ENTREGA DE TURNO ============
+// Lista de actividades pendientes por faena, con observaciones libres y
+// marcado de "hecha" — ver add_entrega_turno.sql. Acceso restringido a
+// coordinador (crear, ver, marcar), no solo en la UI sino también en RLS.
+export interface EntregaTurno {
+  id: string;
+  contrato_id: string;
+  faena: Faena;
+
+  descripcion: string;
+  observaciones?: string | null;
+
+  hecha: boolean;
+  hecha_por?: string | null;
+  hecha_en?: string | null;
+
+  creado_por: string;
+  created_at: string;
+  updated_at: string;
+
+  usuario_creador?: Usuario;
+  usuario_hecha?: Usuario;
+}
+
 // Listas fijas de cargos/equipos del contrato 12501191 (ver MAPEO_CAMPOS.md).
 // Si el día de mañana hay más de un contrato con Daily Report y su propia
 // lista de cargos, esto pasa a vivir en la tabla `contratos` (columna
 // jsonb) en vez de quedar hardcodeado acá.
 export const CARGOS_DIRECTOS = [
-  'Capataz', 'Soldador', 'Termofusionador', 'Maestro Mayor', 'Rigger',
-  'Maestro Mayor Eléctrico', 'Maestro M1', 'Maestro M2 Carpintero', 'Ayudante',
-  'Maestro Mayor Estructuras', 'Maestro 1ra Eléctrico', 'Técnico Montajista',
+  'Técnico Montajista', 'Capataz', 'Soldador', 'Termofusionador', 'Maestro Mayor',
+  'Rigger', 'Maestro Mayor Eléctrico', 'Maestro M1', 'Maestro M2 Carpintero',
+  'Ayudante', 'Maestro Mayor Estructuras', 'Maestro 1ra Eléctrico',
 ] as const;
 
 export const CARGOS_INDIRECTOS = [
-  'Administrador de Contrato', 'Jefe de Oficina Técnica', 'Ingeniero de Calidad',
-  'Jefe de Terreno', 'Supervisor', 'Asesor Prevencion de Riesgos', 'Administrativo',
-  'Logística', 'Conductor', 'Topógrafo', 'Coordinador de Terreno',
+  'Administrador de Contrato', 'Jefe de Oficina Técnica', 'Jefe de Terreno',
+  'Coordinador de Terreno', 'Asesor Prevencion de Riesgos', 'Supervisor',
+  'Ingeniero de Calidad', 'Administrativo', 'Ingeniero de Proyecto',
+  'Logística', 'Conductor', 'Topógrafo',
 ] as const;
 
 export const EQUIPOS_MAQUINARIA = [

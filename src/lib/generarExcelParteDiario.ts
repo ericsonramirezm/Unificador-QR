@@ -1,6 +1,14 @@
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
-import { FAENA_LABELS, HH_TURNO_POR_FAENA, ParteDiario, UserRole } from '@/types/index'
+import {
+  CARGOS_DIRECTOS,
+  CARGOS_INDIRECTOS,
+  EQUIPOS_MAQUINARIA,
+  FAENA_LABELS,
+  HH_TURNO_POR_FAENA,
+  ParteDiario,
+  UserRole,
+} from '@/types/index'
 
 // Genera el Daily Report en Excel EXACTAMENTE con el formato original: se
 // abre la plantilla en blanco (public/plantillas/DR000_12501191.xlsx, la
@@ -581,8 +589,20 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
     if (actividad.cantidad != null) hojaDR.getCell(`N${fila}`).value = actividad.cantidad
   })
 
-  // ---------- Fuerza laboral directa ----------
-  parte.mano_obra_directa.forEach((linea, i) => {
+  // ---------- Fuerza laboral directa / Maquinaria / Fuerza laboral indirecta ----------
+  // Se busca cada fila por NOMBRE (cargo/equipo), recorriendo el orden
+  // ACTUAL de CARGOS_DIRECTOS/EQUIPOS_MAQUINARIA/CARGOS_INDIRECTOS
+  // (src/types/index.ts) — nunca por la posición dentro del arreglo
+  // guardado en el reporte. Un reporte guardado antes de un reordenamiento
+  // de esas listas tiene su mano_obra_directa/maquinaria/mano_obra_indirecta
+  // en el orden VIEJO, pero la plantilla siempre tiene los rótulos del
+  // orden ACTUAL — escribir por índice puro (como se hacía antes)
+  // desalinearía cargo/equipo y datos en cualquier reporte histórico apenas
+  // se reordenara la lista una vez. Reordenamiento real que expuso esto:
+  // conversación 2026-09-08.
+  CARGOS_DIRECTOS.forEach((cargo, i) => {
+    const linea = parte.mano_obra_directa.find((f) => f.cargo === cargo)
+    if (!linea) return
     const fila = FILA_INICIO_DIRECTA + i
     hojaDR.getCell(`D${fila}`).value = linea.contratados
     hojaDR.getCell(`E${fila}`).value = linea.operativos
@@ -592,8 +612,9 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
     })
   })
 
-  // ---------- Maquinaria ----------
-  parte.maquinaria.forEach((linea, i) => {
+  EQUIPOS_MAQUINARIA.forEach((equipo, i) => {
+    const linea = parte.maquinaria.find((f) => f.equipo === equipo)
+    if (!linea) return
     const fila = FILA_INICIO_MAQUINARIA + i
     hojaDR.getCell(`C${fila}`).value = linea.cantidad
     hojaDR.getCell(`D${fila}`).value = linea.mantencion
@@ -604,8 +625,9 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
     })
   })
 
-  // ---------- Fuerza laboral indirecta ----------
-  parte.mano_obra_indirecta.forEach((linea, i) => {
+  CARGOS_INDIRECTOS.forEach((cargo, i) => {
+    const linea = parte.mano_obra_indirecta.find((f) => f.cargo === cargo)
+    if (!linea) return
     const fila = FILA_INICIO_INDIRECTA + i
     hojaDR.getCell(`D${fila}`).value = linea.contratados
     hojaDR.getCell(`E${fila}`).value = linea.operativos

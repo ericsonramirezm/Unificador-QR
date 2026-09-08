@@ -209,8 +209,12 @@ export const DailyReportExcelPreview = ({ parte, contrato, onCerrar }: DailyRepo
                   </tr>
                 </thead>
                 <tbody>
-                  {CARGOS_DIRECTOS.map((cargo, i) => {
-                    const f = parte.mano_obra_directa[i]
+                  {CARGOS_DIRECTOS.map((cargo) => {
+                    // Por nombre, no por posición: un reporte guardado
+                    // antes de reordenar CARGOS_DIRECTOS tiene su arreglo en
+                    // el orden viejo — ver mismo criterio en
+                    // generarExcelParteDiario.ts (2026-09-08).
+                    const f = parte.mano_obra_directa.find((linea) => linea.cargo === cargo)
                     const horas = f?.horas_por_actividad ?? []
                     return (
                       <tr key={cargo}>
@@ -341,8 +345,10 @@ export const DailyReportExcelPreview = ({ parte, contrato, onCerrar }: DailyRepo
                   </tr>
                 </thead>
                 <tbody>
-                  {EQUIPOS_MAQUINARIA.map((equipo, i) => {
-                    const f = parte.maquinaria[i]
+                  {EQUIPOS_MAQUINARIA.map((equipo) => {
+                    // Por nombre, no por posición — ver mismo criterio en
+                    // la sección de Fuerza laboral directa más arriba.
+                    const f = parte.maquinaria.find((linea) => linea.equipo === equipo)
                     const horas = f?.horas_por_actividad ?? []
                     const operativos = (f?.cantidad || 0) - (f?.mantencion || 0) - (f?.standby || 0)
                     return (
@@ -403,8 +409,10 @@ export const DailyReportExcelPreview = ({ parte, contrato, onCerrar }: DailyRepo
                       </tr>
                     </thead>
                     <tbody>
-                      {CARGOS_INDIRECTOS.map((cargo, i) => {
-                        const f = parte.mano_obra_indirecta[i]
+                      {CARGOS_INDIRECTOS.map((cargo) => {
+                        // Por nombre, no por posición — ver mismo criterio
+                        // en la sección de Fuerza laboral directa más arriba.
+                        const f = parte.mano_obra_indirecta.find((linea) => linea.cargo === cargo)
                         return (
                           <tr key={cargo}>
                             <td className={celdaTexto}>{cargo}</td>

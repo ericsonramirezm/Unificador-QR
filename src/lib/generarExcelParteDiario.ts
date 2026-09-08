@@ -467,20 +467,26 @@ function avanzarFilasEMU(hoja: ExcelJS.Worksheet, filaIniExcel: number, distanci
   }
 }
 
-// Altura de banda a usar para un reporte con numFotos fotos: si con la
-// altura de referencia (el recuadro completo dividido en 3 filas, el
-// diseño pensado para 9 fotos) las filas necesarias caben dentro del
-// espacio disponible, se agranda la banda —hasta el doble de esa
-// referencia como tope— para ocupar ese espacio en vez de dejarlo vacío.
-// Si no caben (muchas fotos), se usa la altura de referencia sin cambios
-// y la grilla sigue agregando filas hacia abajo como siempre.
+// Altura de banda a usar para un reporte con numFotos fotos: siempre
+// `totalEMU / numFilas`, así que la grilla completa (todas las filas que
+// hagan falta) SIEMPRE cabe exacta dentro del rango fijo B8:N88 —
+// contenida, sin importar cuántas fotos se agreguen (no hay límite de
+// fotos en el formulario, ver GestorFotos.tsx). El tope de `referenciaEMU
+// * 2` sigue evitando que con pocas fotos (1-3, una sola fila) la banda se
+// estire más de lo necesario y se vea desproporcionada.
+//
+// Antes, con más de 9 fotos (más de 3 filas), la altura se quedaba fija en
+// `referenciaEMU` (el diseño pensado para 9 fotos) en vez de seguir
+// achicándose — la grilla entera terminaba más alta que el espacio
+// disponible y se salía del rango hacia abajo, invadiendo la fila 89
+// ("COORDINADOR DE TERRENO") y lo que viniera después. Reportado
+// 2026-09-08.
 function altoBandaFotoEMU(hoja: ExcelJS.Worksheet, numFotos: number): number {
   const totalEMU = sumaAltoFilasEMU(hoja, GRILLA_FILA_INICIO_EXCEL, GRILLA_FILA_FIN_EXCEL)
   const referenciaEMU = totalEMU / 3
   if (numFotos <= 0) return referenciaEMU
   const numFilas = Math.ceil(numFotos / GRILLA_COLUMNAS)
-  const estiradaEMU = Math.min(referenciaEMU * 2, totalEMU / numFilas)
-  return Math.max(referenciaEMU, estiradaEMU)
+  return Math.min(referenciaEMU * 2, totalEMU / numFilas)
 }
 
 // anchoNaturalEMU/altoNaturalEMU: tamaño real de la foto (en EMU, ver
@@ -662,8 +668,9 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   hojaDR.getCell(CELDA_NOMBRE_COORDINADOR).value = creadorEsCoordinador ? creador!.nombre : ''
 
   // ---------- Fotos (hoja "Imágenes") ----------
-  // Grilla de 3 columnas repartida simétricamente en B7:N90 — ver
-  // calcularCeldaFoto() más arriba. Las esquinas redondeadas se agregan
+  // Grilla de 3 columnas repartida simétricamente en B8:N88 (fila 7 es el
+  // encabezado "IMÁGENES") — ver calcularCeldaFoto() más arriba. Las
+  // esquinas redondeadas se agregan
   // después, en posprocesarExcel(), porque ExcelJS no expone esa opción
   // en su API de addImage.
   //

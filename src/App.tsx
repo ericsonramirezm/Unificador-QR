@@ -25,6 +25,9 @@ const ParteDiarioList = lazy(() =>
 )
 const Compras = lazy(() => import('@components/Compras/Compras').then((m) => ({ default: m.Compras })))
 const Bodega = lazy(() => import('@components/Bodega/Bodega').then((m) => ({ default: m.Bodega })))
+const EntregaTurno = lazy(() =>
+  import('@components/EntregaTurno/EntregaTurno').then((m) => ({ default: m.EntregaTurno }))
+)
 
 const CLAVE_FAENA_ACTIVA = 'unificador-qr:faena-activa'
 
@@ -173,6 +176,10 @@ export function App() {
           )}
 
         {activeView === 'bodega' && <Bodega usuario={usuario} />}
+
+        {activeView === 'entrega-turno' && usuario.rol === UserRole.COORDINADOR && (
+          <EntregaTurno usuario={usuario} contrato={contratoActivo} faenaActiva={faenaActiva} />
+        )}
       </Suspense>
 
       {activeView === 'config' && (

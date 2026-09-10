@@ -786,4 +786,56 @@ export const db = {
     const { error } = await supabase.from('guias_despacho').delete().eq('id', id)
     if (error) throw error
   },
+
+  // ---------- Entrega de Turno ----------
+  // Ver add_entrega_turno.sql. Acceso restringido a coordinador a nivel de
+  // RLS, no solo en la UI — un intento de otro rol vuelve 0 filas o falla,
+  // no un error silencioso con datos ajenos.
+  async obtenerEntregasTurno(contratoId: string, faena: string) {
+    const { data, error } = await supabase
+      .from('entregas_turno')
+      .select('*, usuario_creador:creado_por(nombre, email, rol), usuario_hecha:hecha_por(nombre, email, rol)')
+      .eq('contrato_id', contratoId)
+      .eq('faena', faena)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    return data
+  },
+
+  async crearEntregaTurno(entrega: {
+    contrato_id: string
+    faena: string
+    descripcion: string
+    observaciones: string | null
+    creado_por: string
+  }) {
+    const { data, error } = await supabase.from('entregas_turno').insert([entrega]).select().single()
+    if (error) throw error
+    return data
+  },
+
+  // `hecha = false` limpia hecha_por/hecha_en (permite desmarcar por si se
+  // marcó por error), no solo pasar hecha=true una vez.
+  async marcarEntregaTurnoHecha(id: string, hecha: boolean, usuarioId: string) {
+    const { data, error } = await supabase
+      .from('entregas_turno')
+      .update({
+        hecha,
+        hecha_por: hecha ? usuarioId : null,
+        hecha_en: hecha ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  },
+
+  async eliminarEntregaTurno(id: string) {
+    const { error } = await supabase.from('entregas_turno').delete().eq('id', id)
+    if (error) throw error
+  },
 }

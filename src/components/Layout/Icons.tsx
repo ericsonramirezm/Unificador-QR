@@ -131,3 +131,25 @@ export const IconMaquinaria = () => (
     <circle cx="17" cy="17.5" r="2" />
   </svg>
 )
+
+export const IconAlerta = () => (
+  <svg {...base}>
+    <path d="M12 3.5 21.5 20h-19L12 3.5Z" />
+    <line x1="12" y1="10" x2="12" y2="14.5" />
+    <circle cx="12" cy="17.5" r="0.5" fill="currentColor" stroke="none" />
+  </svg>
+)
+
+export const IconProveedor = () => (
+  <svg {...base}>
+    <rect x="4" y="9" width="10" height="12" />
+    <rect x="14" y="4" width="6" height="17" />
+    <rect x="6.5" y="12" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+    <rect x="10" y="12" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+    <rect x="6.5" y="16" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+    <rect x="10" y="16" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+    <rect x="16.2" y="7" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+    <rect x="16.2" y="10.5" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+    <rect x="16.2" y="14" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+  </svg>
+)

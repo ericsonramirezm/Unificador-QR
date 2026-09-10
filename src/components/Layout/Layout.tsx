@@ -1,6 +1,7 @@
-import { Usuario, UserRole } from '@/types/index'
+import { Faena, FAENA_LABELS, Usuario, UserRole } from '@/types/index'
 import { auth } from '@lib/supabase'
 import { formatearCargo } from '@lib/formato'
+import { Avatar } from '@components/ParteDiario/Avatar'
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   IconApagar,
@@ -34,9 +35,19 @@ interface LayoutProps {
   children: React.ReactNode
   activeView: Vista
   onViewChange: (view: Vista) => void
+  faenaActiva: Faena
+  onFaenaActivaChange: (faena: Faena) => void
 }
 
-export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }: LayoutProps) => {
+export const Layout = ({
+  usuario,
+  onLogout,
+  children,
+  activeView,
+  onViewChange,
+  faenaActiva,
+  onFaenaActivaChange,
+}: LayoutProps) => {
   const [navExpanded, setNavExpanded] = useState(false)
   // En celular la barra no ocupa espacio: se abre como panel sobre el
   // contenido y se cierra al elegir. Antes estaba fija en 80 px incluso en
@@ -85,6 +96,47 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
         className={`${navExpanded ? 'md:w-64' : 'md:w-20'} w-64 fixed inset-y-0 left-0 z-40 h-screen bg-slate-900 text-white flex flex-col transition-transform md:transition-all duration-200
           ${menuMovilAbierto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
+        {/* Encabezado del sidebar: marca + selector de faena activa. El
+            subtítulo y el selector completo solo caben expandido; colapsado
+            se reduce a la sigla de la faena, para no perder la referencia de
+            cuál está activa mientras se navega con el sidebar angosto. */}
+        {(navExpanded || menuMovilAbierto) ? (
+          <div className="px-4 pt-4 pb-3 border-b border-slate-800">
+            <p className="text-sm font-bold text-white leading-tight">Unificador QR</p>
+            <p className="text-[10px] font-semibold text-slate-500 tracking-widest uppercase mb-3">Industrial Ops</p>
+            <label className="block text-[10px] font-semibold text-slate-500 tracking-widest uppercase mb-1">
+              Faena activa
+            </label>
+            <select
+              value={faenaActiva}
+              onChange={(e) => onFaenaActivaChange(e.target.value as Faena)}
+              className="w-full bg-slate-800 border border-slate-700 text-white text-sm font-semibold rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {Object.values(Faena).map((f) => (
+                <option key={f} value={f}>
+                  {FAENA_LABELS[f]}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="px-2 pt-4 pb-3 border-b border-slate-800 flex justify-center">
+            <select
+              value={faenaActiva}
+              onChange={(e) => onFaenaActivaChange(e.target.value as Faena)}
+              aria-label="Faena activa"
+              title="Faena activa"
+              className="w-12 bg-slate-800 border border-slate-700 text-white text-xs font-bold text-center rounded-md py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {Object.values(Faena).map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Toggle: en escritorio expande/colapsa; en celular cierra el panel. */}
         <button
           onClick={() => {
@@ -232,14 +284,15 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
 
         {/* User info + logout */}
         <div className="border-t border-slate-700 p-3 space-y-2">
-          <div className="text-xs text-slate-400">
+          <div className={`flex items-center gap-2 ${navExpanded || menuMovilAbierto ? '' : 'justify-center'}`}>
+            <Avatar nombre={usuario?.nombre} size="sm" />
             {(navExpanded || menuMovilAbierto) && (
-              <>
-                <p className="font-semibold text-slate-200">{usuario?.nombre}</p>
+              <div className="text-xs text-slate-400 min-w-0">
+                <p className="font-semibold text-slate-200 truncate">{usuario?.nombre}</p>
                 {/* formatearCargo, no el valor crudo de la base: antes decía
                     "apr" o "coordinador" en minúsculas. */}
-                <p className="text-slate-400">{formatearCargo(usuario?.rol)}</p>
-              </>
+                <p className="text-slate-400 truncate">{formatearCargo(usuario?.rol)}</p>
+              </div>
             )}
           </div>
           <button
@@ -313,8 +366,8 @@ const NavItem = ({ icon, label, active, onClick, expanded }: NavItemProps) => (
     onClick={onClick}
     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
       active
-        ? 'bg-blue-600 text-white'
-        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+        ? 'bg-blue-600 text-white font-medium'
+        : 'text-slate-300 hover:bg-white/10'
     }`}
   >
     <span className="shrink-0">{icon}</span>

@@ -107,3 +107,27 @@ export const IconApagar = () => (
     <line x1="12" y1="2" x2="12" y2="12" />
   </svg>
 )
+
+export const IconMeta = () => (
+  <svg {...base}>
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="5" />
+    <circle cx="12" cy="12" r="1" />
+  </svg>
+)
+
+export const IconChecklist = () => (
+  <svg {...base}>
+    <path d="M9 11.5 11 13.5 15.5 9" />
+    <rect x="3.5" y="3.5" width="17" height="17" rx="2" />
+  </svg>
+)
+
+export const IconMaquinaria = () => (
+  <svg {...base}>
+    <path d="M3 16.5V8a1 1 0 0 1 1-1h8.5v9.5" />
+    <path d="M12.5 10.5H17l3.5 3v3" />
+    <circle cx="7.5" cy="17.5" r="2" />
+    <circle cx="17" cy="17.5" r="2" />
+  </svg>
+)

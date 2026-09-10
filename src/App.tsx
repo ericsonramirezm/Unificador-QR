@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { Login } from '@components/Auth/Login'
 import { Layout } from '@components/Layout/Layout'
 import { Inicio } from '@components/Inicio/Inicio'
-import { Usuario, UserRole } from '@/types/index'
+import { Faena, Usuario, UserRole } from '@/types/index'
 import { auth, db } from '@lib/supabase'
 import { formatearCargo } from '@lib/formato'
 
@@ -26,6 +26,26 @@ const ParteDiarioList = lazy(() =>
 const Compras = lazy(() => import('@components/Compras/Compras').then((m) => ({ default: m.Compras })))
 const Bodega = lazy(() => import('@components/Bodega/Bodega').then((m) => ({ default: m.Bodega })))
 
+const CLAVE_FAENA_ACTIVA = 'unificador-qr:faena-activa'
+
+// Faena activa: filtro global de sesión (persiste en localStorage, no en
+// la base) que aplica solo a los módulos que tienen concepto de faena
+// (Daily Report, Entrega de Turno) — Compras/Bodega/Documentos no lo
+// reciben, no les corresponde. Distinto del contrato activo (que no es
+// elegible por el usuario) y distinto de la faena que se elige al CREAR un
+// Daily Report (ParteDiarioForm.tsx): ese paso sigue preguntando siempre,
+// no se salta ni se pre-rellena con esto — son dos decisiones separadas a
+// propósito.
+function leerFaenaActivaGuardada(): Faena {
+  try {
+    const guardada = localStorage.getItem(CLAVE_FAENA_ACTIVA)
+    if (guardada === Faena.LT || guardada === Faena.LB) return guardada
+  } catch {
+    // localStorage no disponible (modo privado, etc.) — se usa el valor por defecto.
+  }
+  return Faena.LT
+}
+
 const CargandoVista = () => (
   <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
@@ -33,13 +53,32 @@ const CargandoVista = () => (
   </div>
 )
 
-type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras' | 'bodega'
+type Vista =
+  | 'inicio'
+  | 'documentos'
+  | 'config'
+  | 'historial'
+  | 'usuarios'
+  | 'parte-diario'
+  | 'compras'
+  | 'bodega'
+  | 'entrega-turno'
 
 export function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [activeView, setActiveView] = useState<Vista>('inicio')
   const [contratoActivo, setContratoActivo] = useState<any>(null)
+  const [faenaActiva, setFaenaActiva] = useState<Faena>(() => leerFaenaActivaGuardada())
+
+  const cambiarFaenaActiva = (faena: Faena) => {
+    setFaenaActiva(faena)
+    try {
+      localStorage.setItem(CLAVE_FAENA_ACTIVA, faena)
+    } catch {
+      // localStorage no disponible — la elección solo dura esta sesión.
+    }
+  }
 
   useEffect(() => {
     checkAuth()
@@ -106,6 +145,8 @@ export function App() {
       onLogout={handleLogout}
       activeView={activeView}
       onViewChange={setActiveView}
+      faenaActiva={faenaActiva}
+      onFaenaActivaChange={cambiarFaenaActiva}
     >
       {activeView === 'inicio' && (
         <Inicio usuario={usuario} contrato={contratoActivo} onNavigate={setActiveView} />
@@ -123,7 +164,7 @@ export function App() {
         )}
 
         {activeView === 'parte-diario' && usuario.rol !== UserRole.SUPERVISOR && (
-          <ParteDiarioList usuario={usuario} contrato={contratoActivo} />
+          <ParteDiarioList usuario={usuario} contrato={contratoActivo} faenaActiva={faenaActiva} />
         )}
 
         {activeView === 'compras' &&

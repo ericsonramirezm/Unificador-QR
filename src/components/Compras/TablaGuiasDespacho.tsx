@@ -42,11 +42,12 @@ const NUM_COLUMNAS = 21
 // colapsables al final de la tabla, cerradas por defecto — así la tabla
 // principal se enfoque en lo que sí necesita revisión (Exceso de Recepción
 // y lo que todavía no se ha recibido). Un ítem se asigna por su propio
-// estado, no por el de su grupo de Guía N° (una misma guía puede traer
-// ítems en estados distintos), así que cada sección se agrupa por Guía N°
-// por separado. Si hay una búsqueda activa (Compras.tsx) que trae
-// coincidencias dentro de una sección, esa sección se fuerza abierta para
-// no esconder el resultado.
+// estado, no por el de su grupo (una misma guía puede traer ítems en
+// estados distintos), así que cada sección arma sus propios grupos. Parcial
+// (y la tabla principal) se agrupa por Guía N°, igual que RQ/OC. Completa se
+// agrupa por N° de OC en vez de Guía N° (ver gruposCompleta más abajo). Si
+// hay una búsqueda activa (Compras.tsx) que trae coincidencias dentro de una
+// sección, esa sección se fuerza abierta para no esconder el resultado.
 type EstadoRecepcion = {
   pendiente: number | null
   etiqueta: string
@@ -173,7 +174,11 @@ export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGu
 
   const gruposActivos = agruparPorNumero(itemsActivos, (item) => item.guia_numero, 'Sin N° Guía')
   const gruposParcial = agruparPorNumero(itemsParcial, (item) => item.guia_numero, 'Sin N° Guía')
-  const gruposCompleta = agruparPorNumero(itemsCompleta, (item) => item.guia_numero, 'Sin N° Guía')
+  // Recepción Completa se agrupa por N° de OC (no por Guía N° como el resto):
+  // una misma OC suele llegar en varias guías, y una vez completa lo que
+  // importa para revisar es "qué OC ya se recibió entera", no cómo se
+  // repartió entre guías.
+  const gruposCompleta = agruparPorNumero(itemsCompleta, (item) => item.oc_numero, 'Sin N° OC')
 
   const hayBusqueda = !!busqueda?.trim()
 

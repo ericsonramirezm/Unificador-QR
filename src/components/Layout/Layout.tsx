@@ -1,9 +1,32 @@
 import { Usuario, UserRole } from '@/types/index'
 import { auth } from '@lib/supabase'
 import { formatearCargo } from '@lib/formato'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  IconApagar,
+  IconBodega,
+  IconCalendario,
+  IconCarrito,
+  IconConfiguracion,
+  IconDocumentos,
+  IconEntregaTurno,
+  IconInicio,
+  IconOjo,
+  IconReloj,
+  IconReporte,
+  IconUsuario,
+} from './Icons'
 
-type Vista = 'inicio' | 'documentos' | 'config' | 'historial' | 'usuarios' | 'parte-diario' | 'compras' | 'bodega'
+type Vista =
+  | 'inicio'
+  | 'documentos'
+  | 'config'
+  | 'historial'
+  | 'usuarios'
+  | 'parte-diario'
+  | 'compras'
+  | 'bodega'
+  | 'entrega-turno'
 
 interface LayoutProps {
   usuario: Usuario | null
@@ -71,7 +94,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
           aria-label={navExpanded ? 'Colapsar menú' : 'Expandir menú'}
           className="p-4 hover:bg-slate-800 flex items-center justify-center min-h-[56px]"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <line x1="3" y1="6" x2="21" y2="6"></line>
             <line x1="3" y1="12" x2="21" y2="12"></line>
             <line x1="3" y1="18" x2="21" y2="18"></line>
@@ -81,7 +104,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
         {/* Nav items */}
         <nav className="flex-1 space-y-1 px-2 py-4">
           <NavItem
-            icon="🏠"
+            icon={<IconInicio />}
             label="Inicio"
             active={activeView === 'inicio'}
             onClick={() => irA('inicio')}
@@ -91,14 +114,14 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
           {usuario?.rol === UserRole.COORDINADOR && (
             <>
               <NavItem
-                icon="📋"
+                icon={<IconDocumentos />}
                 label="Documentos"
                 active={activeView === 'documentos'}
                 onClick={() => irA('documentos')}
                 expanded={navExpanded || menuMovilAbierto}
               />
               <NavItem
-                icon="🗓️"
+                icon={<IconCalendario />}
                 label="Historial"
                 active={activeView === 'historial'}
                 onClick={() => irA('historial')}
@@ -109,7 +132,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
 
           {(usuario?.rol === UserRole.APR || usuario?.rol === UserRole.SUPERVISOR) && (
             <NavItem
-              icon="🕒"
+              icon={<IconReloj />}
               label="Historial"
               active={activeView === 'documentos'}
               onClick={() => irA('documentos')}
@@ -119,7 +142,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
 
           {usuario?.rol === UserRole.CONSULTOR && (
             <NavItem
-              icon="👁️"
+              icon={<IconOjo />}
               label="Ver documentos"
               active={activeView === 'documentos'}
               onClick={() => irA('documentos')}
@@ -133,7 +156,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
               2026-08-25. Colocado justo encima de Daily Report a pedido. */}
           {(usuario?.rol === UserRole.COORDINADOR || usuario?.rol === UserRole.CONSULTOR) && (
             <NavItem
-              icon="🛒"
+              icon={<IconCarrito />}
               label="Compras"
               active={activeView === 'compras'}
               onClick={() => irA('compras')}
@@ -148,10 +171,23 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
               después de Compras — posición razonable, no un pedido explícito. */}
           {usuario?.rol_bodega && (
             <NavItem
-              icon="📦"
+              icon={<IconBodega />}
               label="Bodega"
               active={activeView === 'bodega'}
               onClick={() => irA('bodega')}
+              expanded={navExpanded || menuMovilAbierto}
+            />
+          )}
+
+          {/* Entrega de Turno: acceso restringido a coordinador únicamente
+              (crear, ver y marcar) — pedido explícito, ver conversación del
+              2026-09-07. Reforzado también en RLS, no solo acá. */}
+          {usuario?.rol === UserRole.COORDINADOR && (
+            <NavItem
+              icon={<IconEntregaTurno />}
+              label="Entrega de Turno"
+              active={activeView === 'entrega-turno'}
+              onClick={() => irA('entrega-turno')}
               expanded={navExpanded || menuMovilAbierto}
             />
           )}
@@ -165,7 +201,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
               acceso también a nivel de RLS, no solo en este menú. */}
           {usuario?.rol !== UserRole.SUPERVISOR && (
             <NavItem
-              icon="📝"
+              icon={<IconReporte />}
               label="Daily Report"
               active={activeView === 'parte-diario'}
               onClick={() => irA('parte-diario')}
@@ -177,7 +213,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
               explícito) — antes estaba junto a Documentos/Historial. */}
           {usuario?.rol === UserRole.COORDINADOR && (
             <NavItem
-              icon="👤"
+              icon={<IconUsuario />}
               label="Usuarios"
               active={activeView === 'usuarios'}
               onClick={() => irA('usuarios')}
@@ -186,7 +222,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
           )}
 
           <NavItem
-            icon="⚙️"
+            icon={<IconConfiguracion />}
             label="Configuración"
             active={activeView === 'config'}
             onClick={() => irA('config')}
@@ -209,9 +245,9 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
           <button
             onClick={handleLogout}
             aria-label="Cerrar sesión"
-            className="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-3 rounded-lg transition-colors"
+            className="w-full flex items-center justify-center bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-3 rounded-lg transition-colors"
           >
-            {navExpanded || menuMovilAbierto ? 'Cerrar sesión' : '⏻'}
+            {navExpanded || menuMovilAbierto ? 'Cerrar sesión' : <IconApagar />}
           </button>
         </div>
       </div>
@@ -234,7 +270,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
             aria-label="Abrir menú"
             className="md:hidden w-11 h-11 -ml-2 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <line x1="3" y1="6" x2="21" y2="6"></line>
               <line x1="3" y1="12" x2="21" y2="12"></line>
               <line x1="3" y1="18" x2="21" y2="18"></line>
@@ -265,7 +301,7 @@ export const Layout = ({ usuario, onLogout, children, activeView, onViewChange }
 }
 
 interface NavItemProps {
-  icon: string
+  icon: ReactNode
   label: string
   active: boolean
   onClick: () => void
@@ -278,10 +314,10 @@ const NavItem = ({ icon, label, active, onClick, expanded }: NavItemProps) => (
     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
       active
         ? 'bg-blue-600 text-white'
-        : 'text-slate-300 hover:bg-slate-800'
+        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
     }`}
   >
-    <span className="text-lg">{icon}</span>
+    <span className="shrink-0">{icon}</span>
     {expanded && <span className="text-sm font-semibold">{label}</span>}
   </button>
 )

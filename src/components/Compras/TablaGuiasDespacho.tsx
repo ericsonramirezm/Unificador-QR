@@ -1,10 +1,10 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, ReactNode, useEffect, useState } from 'react'
 import { GuiaDespacho } from '@/types/index'
 import { formatearFechaCorta } from '@lib/formato'
 import { agruparPorNumero, type GrupoFilas } from '@lib/agrupar'
 import { CeldaEditable } from './CeldaEditable'
 import { KpiCard } from './KpiCard'
-import { IconAlerta, IconCarrito, IconMeta, IconProveedor } from '@components/Layout/Icons'
+import { IconAlerta, IconCarrito, IconMaquinaria, IconMeta, IconProveedor } from '@components/Layout/Icons'
 
 interface TablaGuiasDespachoProps {
   items: GuiaDespacho[]
@@ -97,6 +97,23 @@ const coincideFiltroEstado = (item: GuiaDespacho, filtro: FiltroEstado): boolean
   return etiqueta === 'Exceso de Recepción'
 }
 
+const inicialesDe = (nombre: string): string => {
+  const partes = nombre.trim().split(/\s+/)
+  if (partes.length === 0 || !partes[0]) return '?'
+  return (partes.length === 1 ? partes[0].slice(0, 2) : partes[0][0] + partes[partes.length - 1][0]).toUpperCase()
+}
+
+// Recepción Completa se renderiza en 3 niveles (OC -> Guía -> Ítems) en vez
+// del agrupamiento plano de las otras secciones: una Orden de Compra puede
+// haberse recibido en más de una guía (entrega parcial previa + final), y
+// una vez que TODO lo de esa OC ya llegó completo, lo útil es ver "qué OC
+// se cerró" y, adentro, cómo se repartió entre guías. Activos y Parcial NO
+// usan esto — ahí una OC casi siempre tiene una sola guía en curso, así que
+// agregar un tercer nivel no aporta y complica innecesariamente.
+interface GrupoOCConGuias extends GrupoFilas<GuiaDespacho> {
+  subgrupos: GrupoFilas<GuiaDespacho>[]
+}
+
 // Columnas fijas al desplazar horizontalmente: Solicitado por, N°, Código
 // Defontana y Descripción — acá sin checkbox (esta tabla no tiene selección
 // múltiple), así que Descripción entra como la 4ª fija en vez de quedar
@@ -117,6 +134,11 @@ export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGu
   const [procesando, setProcesando] = useState(false)
   const [abiertoParcial, setAbiertoParcial] = useState(false)
   const [abiertoCompleta, setAbiertoCompleta] = useState(false)
+  // Colapso por OC dentro de Recepción Completa — por defecto expandida
+  // (ausente en el record = expandida) ya que entrar a "Recepción Completa"
+  // ya fue un clic; colapsar una OC puntual sirve para achicar el ruido de
+  // una OC con muchos ítems, no para esconder todo de entrada.
+  const [ocColapsadas, setOcColapsadas] = useState<Record<string, boolean>>({})
 
   const [guiaPendiente, setGuiaPendiente] = useState<Record<string, string>>({})
   const [guardandoGuia, setGuardandoGuia] = useState<Record<string, boolean>>({})
@@ -239,6 +261,12 @@ export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGu
   // importa para revisar es "qué OC ya se recibió entera", no cómo se
   // repartió entre guías.
   const gruposCompleta = agruparPorNumero(itemsCompleta, (item) => item.oc_numero, 'Sin N° OC')
+  // Nivel 2 de Recepción Completa: dentro de cada OC, sub-agrupa por N° de
+  // Guía (mismo criterio que gruposActivos/gruposParcial, reutilizado).
+  const gruposCompletaAnidados: GrupoOCConGuias[] = gruposCompleta.map((grupoOC) => ({
+    ...grupoOC,
+    subgrupos: agruparPorNumero(grupoOC.filas, (item) => item.guia_numero, 'Sin N° Guía'),
+  }))
 
   const hayBusqueda = !!busqueda?.trim()
   const hayFiltrosActivos = hayBusqueda || filtroEstado !== 'todos' || !!filtroSolicitante || !!fechaDesde || !!fechaHasta
@@ -276,7 +304,14 @@ export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGu
     const claseFondoSticky = estado.claseFila || (banda ? 'bg-slate-50' : 'bg-white')
     return (
       <tr key={item.id} className={estado.claseFila || (banda ? 'bg-slate-50/40' : undefined)}>
-        <td className={`py-2 px-2 ${STICKY} ${IZQ_SOLICITADO} ${claseFondoSticky}`}>{item.solicitado_por}</td>
+        <td className={`py-2 px-2 ${STICKY} ${IZQ_SOLICITADO} ${claseFondoSticky}`}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="shrink-0 w-6 h-6 rounded-full bg-slate-700 text-white text-[10px] font-bold flex items-center justify-center">
+              {inicialesDe(item.solicitado_por)}
+            </span>
+            <span className="truncate">{item.solicitado_por}</span>
+          </div>
+        </td>
         <td className={`py-2 px-2 text-slate-400 font-mono text-xs ${STICKY} ${IZQ_NUMERO} ${claseFondoSticky}`}>
           {item.numero_item}
         </td>
@@ -399,16 +434,100 @@ export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGu
       )
     })
 
+  // Recepción Completa: 3 niveles (OC -> Guía -> Ítems). El colapso vive
+  // solo en el nivel OC (setOcColapsadas) — el nivel Guía no tiene su
+  // propio control: ya se llegó ahí abriendo Recepción Completa Y esa OC
+  // puntual, un tercer clic para ver los ítems sería fricción sin
+  // beneficio real. "OC RECEPCIONADA" y "100% CONFORME" son ciertos para
+  // cada fila mostrada acá: esta función solo se llama con itemsCompleta,
+  // que por construcción ya tiene pendiente = 0 en todos sus ítems.
+  const renderGruposCompleta = (grupos: GrupoOCConGuias[]) =>
+    grupos.map((grupoOC, indiceOC) => {
+      const colapsada = !!ocColapsadas[grupoOC.clave]
+      const primero = grupoOC.filas[0]
+      const scsDistintos = new Set(grupoOC.filas.map((f) => f.codigo_sc)).size
+      const trazabilidad =
+        scsDistintos === 1
+          ? `${primero.codigo_sc}${primero.rq_numero ? ` · ${primero.rq_numero}` : ''}`
+          : `${scsDistintos} Solicitudes de Compra`
+      const proveedores = Array.from(
+        new Set(grupoOC.filas.map((f) => f.proveedor).filter((p): p is string => !!p && p.trim() !== ''))
+      )
+      return (
+        <Fragment key={grupoOC.clave}>
+          <tr className={indiceOC > 0 ? 'border-t-2 border-slate-300' : undefined}>
+            <td colSpan={NUM_COLUMNAS} className="p-0 bg-blue-50/60 border border-blue-100">
+              <button
+                type="button"
+                onClick={() => setOcColapsadas((prev) => ({ ...prev, [grupoOC.clave]: !prev[grupoOC.clave] }))}
+                aria-expanded={!colapsada}
+                className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="inline-block shrink-0 transition-transform text-blue-600"
+                    style={{ transform: colapsada ? 'none' : 'rotate(90deg)' }}
+                  >
+                    ▸
+                  </span>
+                  <span className="shrink-0 text-blue-600">
+                    <IconCarrito />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-800 tracking-wide truncate">
+                      ORDEN DE COMPRA {grupoOC.etiqueta}
+                      <span className="ml-2 text-xs font-medium text-slate-500">({trazabilidad})</span>
+                    </p>
+                    {proveedores.length > 0 && (
+                      <p className="text-xs text-slate-600 font-medium truncate">
+                        {proveedores.length === 1 ? proveedores[0] : `${proveedores.length} proveedores distintos`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <span className="shrink-0 px-2.5 py-0.5 rounded-md text-xs font-semibold tracking-wide bg-blue-100/80 text-blue-700 border border-blue-200/50">
+                  OC RECEPCIONADA · {grupoOC.filas.length} ítem{grupoOC.filas.length === 1 ? '' : 's'}
+                </span>
+              </button>
+            </td>
+          </tr>
+          {!colapsada &&
+            grupoOC.subgrupos.map((sub) => (
+              <Fragment key={`${grupoOC.clave}::${sub.clave}`}>
+                <tr>
+                  <td colSpan={NUM_COLUMNAS} className="px-3 pt-1.5 pb-0.5">
+                    <div className="ml-3 bg-emerald-50/70 border border-emerald-100/80 rounded-md py-1.5 px-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0 text-emerald-700">
+                        <IconMaquinaria />
+                        <span className="text-xs font-bold text-emerald-900 tracking-wide truncate">
+                          {sub.etiqueta === 'Sin N° Guía' ? 'SIN N° DE GUÍA REGISTRADO' : `GUÍA DE DESPACHO N° ${sub.etiqueta}`}
+                          {' · '}RECEPCIÓN COMPLETA · {sub.filas.length} ÍTEM{sub.filas.length === 1 ? '' : 'S'} VALIDADO
+                          {sub.filas.length === 1 ? '' : 'S'} EN BODEGA
+                        </span>
+                      </div>
+                      <span className="shrink-0 bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs px-2 py-0.5 rounded-full font-bold">
+                        ✓ 100% CONFORME
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+                {sub.filas.map((item) => renderFila(item, false))}
+              </Fragment>
+            ))}
+        </Fragment>
+      )
+    })
+
   // Sección archivada y colapsable (Recepción Completa / Parcial). No
   // renderiza nada si no hay ítems en ese estado. Se fuerza abierta mientras
   // hay una búsqueda o un filtro nuevo activo, para no esconder un resultado.
   const renderSeccionArchivada = (
     etiqueta: string,
-    grupos: GrupoFilas<GuiaDespacho>[],
     total: number,
     abierto: boolean,
     alternar: () => void,
-    claseAcento: string
+    claseAcento: string,
+    renderContenido: () => ReactNode
   ) => {
     if (total === 0) return null
     const mostrarContenido = abierto || hayFiltrosActivos
@@ -431,7 +550,7 @@ export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGu
             </button>
           </td>
         </tr>
-        {mostrarContenido && renderGrupos(grupos)}
+        {mostrarContenido && renderContenido()}
       </Fragment>
     )
   }
@@ -583,19 +702,19 @@ export const TablaGuiasDespacho = ({ items, cargando, busqueda, onDevolver, onGu
                 {renderGrupos(gruposActivosPagina)}
                 {renderSeccionArchivada(
                   'Recepción Parcial',
-                  gruposParcial,
                   itemsParcial.length,
                   abiertoParcial,
                   () => setAbiertoParcial((v) => !v),
-                  'border-l-4 border-amber-500 bg-amber-50/60 text-amber-800'
+                  'border-l-4 border-amber-500 bg-amber-50/60 text-amber-800',
+                  () => renderGrupos(gruposParcial)
                 )}
                 {renderSeccionArchivada(
                   'Recepción Completa',
-                  gruposCompleta,
                   itemsCompleta.length,
                   abiertoCompleta,
                   () => setAbiertoCompleta((v) => !v),
-                  'border-l-4 border-emerald-500 bg-emerald-50/60 text-emerald-800'
+                  'border-l-4 border-emerald-500 bg-emerald-50/60 text-emerald-800',
+                  () => renderGruposCompleta(gruposCompletaAnidados)
                 )}
               </tbody>
             </table>

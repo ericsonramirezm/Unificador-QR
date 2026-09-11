@@ -358,9 +358,12 @@ function horaATiempoExcel(hora: string | null | undefined): Date | null {
 // resultado es exacto y predecible, igual que con las firmas.
 const GRILLA_COL_INICIO_EXCEL = 2 // columna B (1-index, como usa ExcelJS getColumn)
 const GRILLA_COL_FIN_EXCEL = 14 // columna N, INCLUSIVE (antes se usaba un límite de 13 en índice 0 que en la práctica dejaba la columna N entera sin usar — el hueco a la derecha del reclamo)
-const GRILLA_FILA_INICIO_EXCEL = 8 // primera fila de la grilla (fila 7 = encabezado "IMÁGENES", no se toca)
+// El encabezado "IMÁGENES" está fusionado en la fila 6, no en la 7 (que
+// está vacía) — la fila 7 se dejaba sin usar por error. Corregido
+// 2026-09-11 para que la grilla arranque ahí y aproveche esa fila.
+const GRILLA_FILA_INICIO_EXCEL = 7 // primera fila de la grilla
 const GRILLA_FILA_FIN_EXCEL = 88 // última fila de la grilla, justo antes de la fila 89 ("COORDINADOR DE TERRENO") — antes se usaba FILA_FIRMA_IMAGENES (fila 91, la fila "Firma"), que se metía 2 filas de más en la zona de Nombre/encabezado de esa sección
-const GRILLA_COLUMNAS = 3
+const LIMITE_FOTOS_DEFENSIVO = 60 // tope defensivo de fotos a procesar, no debería alcanzarse en uso normal
 // ~23.6pt — mismo valor para el margen entre tarjetas Y el margen contra el
 // borde del recuadro (mitad de este valor a cada lado de cada tarjeta), para
 // que quede simétrico en las 4 direcciones. Calibrado (2026-08-25) contra un
@@ -475,13 +478,34 @@ function avanzarFilasEMU(hoja: ExcelJS.Worksheet, filaIniExcel: number, distanci
   }
 }
 
-// Altura de banda a usar para un reporte con numFotos fotos: siempre
-// `totalEMU / numFilas`, así que la grilla completa (todas las filas que
-// hagan falta) SIEMPRE cabe exacta dentro del rango fijo B8:N88 —
-// contenida, sin importar cuántas fotos se agreguen (no hay límite de
-// fotos en el formulario, ver GestorFotos.tsx). El tope de `referenciaEMU
-// * 2` sigue evitando que con pocas fotos (1-3, una sola fila) la banda se
-// estire más de lo necesario y se vea desproporcionada.
+// Cuántas columnas usa la grilla: NO es fija, se recalcula para cada
+// reporte según numFotos — con 3 columnas fijas, un reporte con muchas
+// fotos (40+) armaba una sola columna muy alta y angosta de 14+ filas,
+// cada foto diminuta, aunque técnicamente cupieran dentro de B7:N88. La
+// fórmula reparte numFotos en una grilla cuyas celdas se acercan a la
+// proporción ancho/alto del recuadro disponible (mismo principio que usan
+// los layouts de galería: columnas ≈ sqrt(N × ancho/alto del contenedor)),
+// así que más fotos ensanchan la grilla en vez de solo alargarla.
+//
+// Reproduce los dos casos conocidos: el diseño original (9 fotos → 3
+// columnas, 3 filas) y el ejemplo armado a mano por el usuario para 42
+// fotos (→ 6 columnas, 7 filas) — ver conversación 2026-09-11.
+function calcularColumnasGrilla(hoja: ExcelJS.Worksheet, numFotos: number): number {
+  if (numFotos <= 1) return 1
+  const anchoTotalEMU = sumaAnchoColumnasEMU(hoja, GRILLA_COL_INICIO_EXCEL, GRILLA_COL_FIN_EXCEL)
+  const altoTotalEMU = sumaAltoFilasEMU(hoja, GRILLA_FILA_INICIO_EXCEL, GRILLA_FILA_FIN_EXCEL)
+  const columnas = Math.round(Math.sqrt(numFotos * (anchoTotalEMU / altoTotalEMU)))
+  return Math.max(1, Math.min(numFotos, columnas))
+}
+
+// Altura de banda a usar para un reporte con numFotos fotos (repartidas en
+// `columnas` columnas, ver calcularColumnasGrilla): siempre `totalEMU /
+// numFilas`, así que la grilla completa (todas las filas que hagan falta)
+// SIEMPRE cabe exacta dentro del rango fijo B7:N88 — contenida, sin
+// importar cuántas fotos se agreguen (no hay límite de fotos en el
+// formulario, ver GestorFotos.tsx). El tope de `referenciaEMU * 2` sigue
+// evitando que con pocas fotos (1-3, una sola fila) la banda se estire más
+// de lo necesario y se vea desproporcionada.
 //
 // Antes, con más de 9 fotos (más de 3 filas), la altura se quedaba fija en
 // `referenciaEMU` (el diseño pensado para 9 fotos) en vez de seguir
@@ -489,11 +513,11 @@ function avanzarFilasEMU(hoja: ExcelJS.Worksheet, filaIniExcel: number, distanci
 // disponible y se salía del rango hacia abajo, invadiendo la fila 89
 // ("COORDINADOR DE TERRENO") y lo que viniera después. Reportado
 // 2026-09-08.
-function altoBandaFotoEMU(hoja: ExcelJS.Worksheet, numFotos: number): number {
+function altoBandaFotoEMU(hoja: ExcelJS.Worksheet, numFotos: number, columnas: number): number {
   const totalEMU = sumaAltoFilasEMU(hoja, GRILLA_FILA_INICIO_EXCEL, GRILLA_FILA_FIN_EXCEL)
   const referenciaEMU = totalEMU / 3
   if (numFotos <= 0) return referenciaEMU
-  const numFilas = Math.ceil(numFotos / GRILLA_COLUMNAS)
+  const numFilas = Math.ceil(numFotos / columnas)
   return Math.min(referenciaEMU * 2, totalEMU / numFilas)
 }
 
@@ -508,13 +532,14 @@ function calcularCeldaFoto(
   index: number,
   alturaBandaEMU: number,
   anchoNaturalEMU: number,
-  altoNaturalEMU: number
+  altoNaturalEMU: number,
+  columnas: number
 ) {
-  const col = index % GRILLA_COLUMNAS
-  const fila = Math.floor(index / GRILLA_COLUMNAS)
+  const col = index % columnas
+  const fila = Math.floor(index / columnas)
 
   const anchoTotalEMU = sumaAnchoColumnasEMU(hoja, GRILLA_COL_INICIO_EXCEL, GRILLA_COL_FIN_EXCEL)
-  const anchoBandaEMU = anchoTotalEMU / GRILLA_COLUMNAS
+  const anchoBandaEMU = anchoTotalEMU / columnas
 
   // Espacio disponible para la foto dentro de su celda (sin contar el
   // margen entre tarjetas ni la banda reservada para el pie de foto).
@@ -690,11 +715,11 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   hojaDR.getCell(CELDA_NOMBRE_COORDINADOR).value = creadorEsCoordinador ? creador!.nombre : ''
 
   // ---------- Fotos (hoja "Imágenes") ----------
-  // Grilla de 3 columnas repartida simétricamente en B8:N88 (fila 7 es el
-  // encabezado "IMÁGENES") — ver calcularCeldaFoto() más arriba. Las
-  // esquinas redondeadas se agregan
-  // después, en posprocesarExcel(), porque ExcelJS no expone esa opción
-  // en su API de addImage.
+  // Grilla de columnas repartida simétricamente en B7:N88 — el número de
+  // columnas se recalcula según cuántas fotos hay (ver
+  // calcularColumnasGrilla() más arriba), no es fijo. Las esquinas
+  // redondeadas se agregan después, en posprocesarExcel(), porque ExcelJS
+  // no expone esa opción en su API de addImage.
   //
   // Se descargan TODAS las fotos primero (sin insertarlas todavía) para
   // saber cuántas se lograron descargar de verdad antes de calcular la
@@ -702,7 +727,7 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
   // foto fallara al descargarse, la grilla quedaría con una fila de menos
   // fotos de lo esperado y un hueco vacío abajo (el mismo problema que se
   // está corrigiendo, pero por otra causa).
-  const fotosValidas = parte.fotos.slice(0, GRILLA_COLUMNAS * 20) // límite defensivo, no debería alcanzarse en uso normal
+  const fotosValidas = parte.fotos.slice(0, LIMITE_FOTOS_DEFENSIVO)
   const fotosDescargadas: { buffer: ArrayBuffer; extension: 'png' | 'jpeg'; caption?: string }[] = []
   for (const foto of fotosValidas) {
     try {
@@ -717,7 +742,8 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
     }
   }
 
-  const alturaBandaGrilla = altoBandaFotoEMU(hojaImagenes, fotosDescargadas.length)
+  const columnasGrilla = calcularColumnasGrilla(hojaImagenes, fotosDescargadas.length)
+  const alturaBandaGrilla = altoBandaFotoEMU(hojaImagenes, fotosDescargadas.length, columnasGrilla)
 
   // No siempre coincide con fotosValidas.length: si alguna foto falla al
   // descargarse (catch más arriba) se salta y no se inserta ningún ancla
@@ -730,7 +756,7 @@ export async function generarExcelParteDiario(parte: ParteDiario): Promise<Blob>
     const dimensiones = dimensionesImagen(foto.buffer, foto.extension)
     const anchoNaturalEMU = dimensiones.width * EMU_POR_PIXEL
     const altoNaturalEMU = dimensiones.height * EMU_POR_PIXEL
-    const celda = calcularCeldaFoto(hojaImagenes, fotosInsertadas, alturaBandaGrilla, anchoNaturalEMU, altoNaturalEMU)
+    const celda = calcularCeldaFoto(hojaImagenes, fotosInsertadas, alturaBandaGrilla, anchoNaturalEMU, altoNaturalEMU, columnasGrilla)
     // Los tipos de ExcelJS piden una instancia completa de su clase Anchor
     // (con nativeCol/nativeRow/etc.), pero en tiempo de ejecución acepta
     // objetos planos {nativeCol, nativeColOff, nativeRow, nativeRowOff} sin
